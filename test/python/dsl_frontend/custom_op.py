@@ -67,14 +67,14 @@ class CompiledKernel:
 KERNEL_CACHE = {}
 
 class CustomOp(torch.nn.Module):
-  def __init__(self, kernel_file, device=None):
-    super(CustomOp, self).__init__()
-    if device is None:
-      self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    else:
-      self.device = device
-    self.custom_lib, self.custom_key, inout_info = load_kernel(kernel_file)
-    self.output_list = inout_info[1]
+  # def __init__(self, kernel_file, device=None):
+  #   super(CustomOp, self).__init__()
+  #   if device is None:
+  #     self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+  #   else:
+  #     self.device = device
+  #   self.custom_lib, self.custom_key, inout_info = load_kernel(kernel_file)
+  #   self.output_list = inout_info[1]
 
   
   def __init__(self, ir, input_orders, extra_outputs=[], tags="", steps=1, arch='g3090', device=None):
@@ -103,13 +103,16 @@ class CustomOp(torch.nn.Module):
     self.input_orders = sorted(input_list, key=lambda x: x[0])
     self.graph = generate_welder_graph(ir, input_list, extra_outputs, tags)
 
-    graph_path = f'/home/jxue/.cache/nnfusion/graph/{self.hash_key}.json'
-    tuned_graph_path = f'/home/jxue/.cache/nnfusion/graph/{self.hash_key}.kernel.json'
+    graph_path = f'{os.environ["HOME"]}/.kernel/{self.hash_key}.json'
+    tuned_graph_path = f'{os.environ["HOME"]}/.kernel/{self.hash_key}.kernel.json'
     if not os.path.exists(tuned_graph_path) or steps > 1:
+      directory = os.path.dirname(graph_path)  
+      if not os.path.exists(directory):  
+          os.makedirs(directory) 
       with open(graph_path, 'w+') as fp:
         fp.write(self.graph)
       
-      cmd = f'python3 -m run_compiler {graph_path} {tuned_graph_path} --device 0 --topk {steps} --arch {arch}'
+      cmd = f'python3.9 -m run_compiler {graph_path} {tuned_graph_path} --device 0 --topk {steps} --arch {arch}'
       print(cmd)
       os.system(cmd)
       assert os.path.exists(tuned_graph_path)
