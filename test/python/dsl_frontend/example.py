@@ -43,7 +43,7 @@ m2[N0, N1] = m1[N0, N1].cast(`float16`);
 m3[N0, N1] = m2[N0, N1] * input3[N0, N1] / const({1-p}).cast(`float16`); 
 m4[N0, N2] +=! m3[N0, N1] * input1[N2, N1];
 output0[N0, N2] = m4[N0, N2] + input2[N0];
-''', input_orders={'input0': x, 'input1': weight, 'input2': bias, 'input3': mask}, tags="tensorCoreConfig=(0, 1)", device=device)
+''', input_orders={'input0': x, 'input1': weight, 'input2': bias, 'input3': mask}, tags="tensorCoreConfig=(0, 1)", device=device, arch="A100")
         y = fused_op([x, weight, bias, mask])
         ctx.save_for_backward(x, weight, mask)
         ctx.p = p
@@ -60,7 +60,7 @@ m1[N0, N1] = m0[N0, N1] * const(0.5).cast(`float32`) * (const(1.0).cast(`float32
 m2[N0, N1] = m1[N0, N1].cast(`float16`); 
 m3[N0, N1] = m2[N0, N1] * input2[N0, N1] / const({1-p}).cast(`float16`); 
 output0[N2, N1] +=! input1[N0, N2] * m3[N0, N1];
-''', input_orders={'input0': x, 'input1': dy, 'input2': mask}, tags="tensorCoreConfig=(0, 1)", device=device)
+''', input_orders={'input0': x, 'input1': dy, 'input2': mask}, tags="tensorCoreConfig=(0, 1)", device=device, arch="A100")
         dw = dw_op([x, dy, mask])
 
         dx_op = CustomOp(ir=f'''
@@ -70,7 +70,7 @@ m2[N0, N1] = m1[N0, N1].cast(`float32`);
 m3[N0, N1] = const(0.5).cast(`float32`) * (const(1.0).cast(`float32`) + (input0[N0, N1] * const({M_SQRT1_2}).cast(`float32`)).call(`erf`));
 m4[N0, N1] = (const(-0.5).cast(`float32`) * input0[N0, N1] * input0[N0, N1]).call(`exp`) * const({M_2_SQRTPI * M_SQRT1_2 * 0.5}).cast(`float32`);
 output0[N0, N1] = m2[N0, N1] * (m3[N0, N1] + input0[N0, N1] * m4[N0, N1]);
-''', input_orders={'input0': x, 'input1': weight, 'input2': mask, 'input3': dy}, tags="tensorCoreConfig=(0, 1)", device=device)
+''', input_orders={'input0': x, 'input1': weight, 'input2': mask, 'input3': dy}, tags="tensorCoreConfig=(0, 1)", device=device, arch="A100")
         dx = dx_op([x, weight, mask, dy])
         return dx, dw, dbias, None
 
@@ -103,8 +103,8 @@ if __name__ == '__main__':
     y_ref = ref(x)
     y_fused = fused(x)
 
-    y_grad = torch.ones_like(y, device=device)
-    y.backward(y_grad)
+    y_grad = torch.ones_like(y_fused, device=device)
+    y_fused.backward(y_grad)
 
     # start = time.time()
     # for i in range(100):
