@@ -62,7 +62,7 @@ output0[N0, N2] +=! input1[N0, N1] * input0[N1, N2];
         dx = dx_op([weight, dy])
         print ("dx\t: ", dx.shape)
 
-        return dx, dw, dbias, None
+        return dx, dw, dbias
 
 class FusedMatmul(nn.Module):
     def __init__(

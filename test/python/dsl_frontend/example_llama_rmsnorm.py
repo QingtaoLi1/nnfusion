@@ -27,16 +27,19 @@ class FusedLlamaRMSNormFunc(torch.autograd.Function):
         print ("hidden_states\t: ", hidden_states.shape)    # [Batch, Seq, Hidden]
         print ("weights\t: ", weights.shape)                # [Hidden]
 
+        batch_size = hidden_states.shape[0]
+        seq_len = hidden_states.shape[1]
         hidden_size = hidden_states.shape[-1]
         fused_op = CustomOp(ir=f'''
 m0[B, S, H] = input0[B, S, H].cast(`float32`);
 m1[B, S, H] = (m0[B, S, H]).call(`pow`, [const(2.0)]);
 m2[B, S] +=! m1[B, S, H];
 m3[B, S] = m2[B, S] / const({hidden_size});
-m4[B, S] = const(1.0) / (m3[B, S] + const({eps}).call(`sqrt`));
+m4[B, S] = const(1.0) / (m2[B, S] / const({hidden_size}) + const({eps}).call(`sqrt`));
 m5[B, S, H] = m1[B, S, H] * m4[B, S];
-output0[B, S, H] = input1[H] * m5[B, S, H].cast(`float16`);
-''', input_orders={'input0': hidden_states, 'input1': weights}, tags="tensorCoreConfig=(0, 1)", device=device, arch="A100")
+m6[B, S, H] = m5[B, S, H].cast(`float16`);
+output0[B, S, H] = m6[B, S, H] * input1[H];
+''', input_orders={'input0': hidden_states, 'input1': weights}, device=device, arch="A100")
         y = fused_op([hidden_states, weights])
         print ("y\t: ", y.shape)
 
@@ -56,8 +59,8 @@ m2[B, S] +=! m1[B, S, H];
 m3[B, S] = m2[B, S] / const({hidden_size});
 m4[B, S] = const(1.0) / ((m3[B, S] + const({eps})).call(`sqrt`));
 m5[B, S, H] = m1[B, S, H] * m4[B, S];
-output0[H] +=! m5[B, S, H] * input2[B, S, H];
-''', input_orders={'input0': hidden_states, 'input2': dy}, tags="tensorCoreConfig=(0, 1)", device=device, arch="A100")
+output0[H] +=! m5[B, S, H] * input1[B, S, H];
+''', input_orders={'input0': hidden_states, 'input1': dy}, device=device, arch="A100")
         dw = dw_op([hidden_states, dy])
 
         dx_op = CustomOp(ir=f'''
@@ -72,7 +75,7 @@ dm3[B, S] = dm4[B, S] * const(-0.5) * (m3[B, S] + const({eps}).call(`pow`, [cons
 dm2[B, S] = dm3[B, S] / const({hidden_size});
 dm1[B, S, H] = dm2[B, S];
 output0[B, S, H] = dm1[B, S, H] * const(2.0) * m0[B, S, H];
-''', input_orders={'input0': hidden_states, 'input1': weight, 'input2': dy}, tags="tensorCoreConfig=(0, 1)", device=device, arch="A100")
+''', input_orders={'input0': hidden_states, 'input1': weight, 'input2': dy}, device=device, arch="A100")
         dx = dx_op([hidden_states, weight, dy])
 
         return dx, dw, None
