@@ -34,9 +34,7 @@ class FusedLlamaRMSNormFunc(torch.autograd.Function):
 m0[B, S, H] = input0[B, S, H].cast(`float32`);
 m1[B, S, H] = (m0[B, S, H]).call(`pow`, [const(2.0)]);
 m2[B, S] +=! m1[B, S, H];
-m3[B, S] = m2[B, S] / const({hidden_size});
-m4[B, S] = const(1.0) / (m2[B, S] / const({hidden_size}) + const({eps}).call(`sqrt`));
-m5[B, S, H] = m1[B, S, H] * m4[B, S];
+m5[B, S, H] = m1[B, S, H] / (m2[B, S] / const({hidden_size}) + const({eps}).call(`sqrt`));
 m6[B, S, H] = m5[B, S, H].cast(`float16`);
 output0[B, S, H] = m6[B, S, H] * input1[H];
 ''', input_orders={'input0': hidden_states, 'input1': weights}, device=device, arch="A100")
@@ -97,9 +95,9 @@ class FusedLlamaRMSNorm(nn.Module):
 if __name__ == '__main__':
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     torch.set_default_dtype(torch.float16)
-    x = torch.randn(16, 2048, 4096, requires_grad=True, device=device)
-    ref = LlamaRMSNorm(4096).to(device)
-    fused = FusedLlamaRMSNorm(4096).to(device)
+    x = torch.randn(16, 256, 512, requires_grad=True, device=device)
+    ref = LlamaRMSNorm(512).to(device)
+    fused = FusedLlamaRMSNorm(512).to(device)
     
     y_ref = ref(x)
     y_fused = fused(x)
