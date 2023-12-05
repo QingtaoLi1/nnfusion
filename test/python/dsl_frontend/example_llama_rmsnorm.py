@@ -102,6 +102,10 @@ class FusedLlamaRMSNorm(nn.Module):
 
 
 def test_forward_time(repeat, module, *args):
+    warmup = 100
+    for i in range(warmup):
+        y = module(*args)
+
     elapsed_time = 0
     for i in range(repeat):
         start = time.time()
@@ -111,6 +115,12 @@ def test_forward_time(repeat, module, *args):
     print (f"{module} forward time: {elapsed_time/repeat} sec.")
 
 def test_backward_time(repeat, module, *args):
+    warmup = 100
+    for i in range(warmup):
+        y = module(*args)
+        loss = y.sum()
+        loss.backward()
+        
     elapsed_time = 0
     for i in range(repeat):
         y = module(*args)
@@ -156,7 +166,7 @@ if __name__ == '__main__':
 
     # Check efficiency
     print ("------ Efficiency Check ------")
-    repeat = 100
+    repeat = 1000
     test_forward_time(repeat, ref, x)
     test_forward_time(repeat, fused, x2)
     test_backward_time(repeat, ref, x)
