@@ -24,12 +24,8 @@ class LlamaRMSNorm(nn.Module):
 class FusedLlamaRMSNormFunc(torch.autograd.Function):
     @staticmethod
     def forward(ctx, hidden_states, weights, eps):
-        print ("hidden_states\t: ", hidden_states.shape)    # [Batch, Seq, Hidden]
-        print ("weights\t: ", weights.shape)                # [Hidden]
+        seq_len, hidden_size = hidden_states.shape
 
-        batch_size = hidden_states.shape[0]
-        seq_len = hidden_states.shape[1]
-        hidden_size = hidden_states.shape[-1]
         var_op = CustomOp(ir=f'''
 m0[S, H] = input0[S, H].cast(`float32`);
 m1[S, H] = m0[S, H].call(`pow`, [const(2.0).cast(`float32`)]);
@@ -44,7 +40,6 @@ m5[S, H] = m0[S, H] / (input2[S] + const({eps}).cast(`float32`)).call(`sqrt`);
 output0[S, H] = m5[S, H].cast(`float16`) * input1[H];
 ''', input_orders={'input0': hidden_states, 'input1': weights, 'input2': var}, device=device, arch="A100")
         y = fused_op([hidden_states, weights, var])
-        print ("y\t: ", y.shape)
 
         ctx.save_for_backward(hidden_states, weights)
         ctx.eps = eps
@@ -71,7 +66,7 @@ output0[S, H] = m0[S, H] / m1[S].call(`sqrt`);
         m5 = m5_op([hidden_states, var])
         
         dw_op = CustomOp(ir=f'''
-output0[H] +=! input0[S, H].cast(`float32`) * input1[S, H].cast(`float32`);
+output0[H] +=! input0[S, H].cast(`float32`) * input1[S, H].cast(`float16`);
 ''', input_orders={'input0': dy, 'input1': m5}, device=device, arch="A100")
         dw = dw_op([dy, m5])
 
@@ -106,27 +101,31 @@ class FusedLlamaRMSNorm(nn.Module):
     def forward(self, hidden_states):
         return FusedLlamaRMSNormFunc.apply(hidden_states, self.weight, self.variance_epsilon)
     
-
 if __name__ == '__main__':
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     torch.set_default_dtype(torch.float16)
     x = torch.randn(2048, 512, requires_grad=True, device=device)
-    x2 = x.detach().clone()
+    x2 = x.detach().clone().requires_grad_()
     ref = LlamaRMSNorm(512).to(device)
     fused = FusedLlamaRMSNorm(512).to(device)
     
     y_ref = ref(x)
-    y_ref_grad = torch.ones_like(y_ref, device=device)
-    y_ref.backward(y_ref_grad)
+    loss_ref = y_ref.sum()
+    loss_ref.backward()
 
     y_fused = fused(x2)
-    y_fused_grad = torch.ones_like(y_fused, device=device)
-    y_fused.backward(y_fused_grad)
+    loss_fused = y_fused.sum()
+    loss_fused.backward()
 
-    print (y_ref[0][:10])
-    print (y_fused[0][:10])
-    print (x.grad[0][:10])
-    print (x2.grad[0][:10])
+    print (f"y_ref      : {y_ref[0][:10]}")
+    print (f"y_fused    : {y_fused[0][:10]}")
+    print (f"x_ref_grad : {x.grad[0][:10]}")
+    print (f"x_fused_grad: {x2.grad[0][:10]}")
+    print (f"w_ref_grad : {ref.weight.grad[:10]}")
+    print (f"w_fused_grad: {fused.weight.grad[:10]}")
+    assert (torch.allclose(y_ref, y_fused, atol=1e-3, rtol=1e-3))
+    assert (torch.allclose(x.grad, x2.grad, atol=1e-3, rtol=1e-3))
+    assert (torch.allclose(ref.weight.grad, fused.weight.grad, atol=1e-3, rtol=1e-3))
 
     # start = time.time()
     # for i in range(100):
