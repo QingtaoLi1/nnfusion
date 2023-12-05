@@ -84,14 +84,6 @@ class CustomOp(torch.nn.Module):
     else:
       self.device = device
     ir = ir.replace('"', '`').replace('\n', ' ').strip()
-    self.hash_key = hashlib.sha256(ir.encode()).hexdigest()
-    if self.hash_key in KERNEL_CACHE:
-      cache = KERNEL_CACHE[self.hash_key]
-      self.custom_lib = cache.custom_lib
-      self.custom_key = cache.custom_key
-      self.output_list = cache.inout_info[1]
-      return
-      
     input_list, index = [], 0
     for k in input_orders:
       if isinstance(input_orders[k], tuple):
@@ -103,6 +95,14 @@ class CustomOp(torch.nn.Module):
     self.input_orders = sorted(input_list, key=lambda x: x[0])
     self.graph = generate_welder_graph(ir, input_list, extra_outputs, tags)
 
+    self.hash_key = hashlib.sha256((ir + str(input_list) + str(extra_outputs) + str(tags)).encode()).hexdigest()
+    if self.hash_key in KERNEL_CACHE:
+      cache = KERNEL_CACHE[self.hash_key]
+      self.custom_lib = cache.custom_lib
+      self.custom_key = cache.custom_key
+      self.output_list = cache.inout_info[1]
+      return
+      
     graph_path = f'{os.environ["HOME"]}/.kernel/{self.hash_key}.json'
     tuned_graph_path = f'{os.environ["HOME"]}/.kernel/{self.hash_key}.kernel.json'
     if not os.path.exists(tuned_graph_path) or steps > 1:
