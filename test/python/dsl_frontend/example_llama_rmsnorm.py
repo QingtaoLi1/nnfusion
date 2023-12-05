@@ -41,49 +41,33 @@ output0[S, H] = m5[S, H].cast(`float16`) * input1[H];
 ''', input_orders={'input0': hidden_states, 'input1': weights, 'input2': var}, device=device, arch="A100")
         y = fused_op([hidden_states, weights, var])
 
-        ctx.save_for_backward(hidden_states, weights)
+        ctx.save_for_backward(hidden_states, weights, var)
         ctx.eps = eps
         return y
     
     @staticmethod
     def backward(ctx, dy):
-        hidden_states, weights = ctx.saved_tensors
+        hidden_states, weights, var = ctx.saved_tensors
         eps = ctx.eps
         hidden_size = hidden_states.shape[-1]
 
-        var_op = CustomOp(ir=f'''
-m0[S, H] = input0[S, H].cast(`float32`);
-m1[S, H] = m0[S, H].call(`pow`, [const(2.0).cast(`float32`)]);
-m2[S] +=! m1[S, H];
-output0[S] = m2[S] / const({hidden_size}).cast(`float32`);
-''', input_orders={'input0': hidden_states}, device=device, arch="A100")
-        var = var_op([hidden_states])
-
-        m5_op = CustomOp(ir=f'''
-m0[S, H] = input0[S, H].cast(`float32`);
-output0[S, H] = m0[S, H] / (input1[S] + const({eps}).cast(`float32`)).call(`sqrt`);
-''', input_orders={'input0': hidden_states, 'input1': var}, device=device, arch="A100")
-        m5 = m5_op([hidden_states, var])
-        
         dw_op = CustomOp(ir=f'''
-output0[H] +=! input0[S, H].cast(`float32`) * input1[S, H].cast(`float16`);
-''', input_orders={'input0': dy, 'input1': m5}, device=device, arch="A100")
-        dw = dw_op([dy, m5])
-
-        dvar_op = CustomOp(ir=f'''
-dm5[S, H] = input0[S, H].cast(`float32`) * input1[H].cast(`float32`);
-m0[S] +=! dm5[S, H] * input2[S, H].cast(`float32`);
-output0[S] = m0[S] * const(-0.5).cast(`float32`) * (input3[S].cast(`float32`) + const({eps}).cast(`float32`)).call(`pow`, [const(-1.5).cast(`float32`)]);
-''', input_orders={'input0': dy, 'input1': weights, 'input2': hidden_states, 'input3': var}, device=device, arch="A100")
-        dvar = dvar_op([dy, weights, hidden_states, var])
+m0[S, H] = input0[S, H].cast(`float32`);
+m5[S, H] = m0[S, H] / (input1[S] + const({eps}).cast(`float32`)).call(`sqrt`);
+output0[H] +=! input2[S, H].cast(`float32`) * m5[S, H].cast(`float16`);
+''', input_orders={'input0': hidden_states, 'input1': var, 'input2': dy}, device=device, arch="A100")
+        dw = dw_op([hidden_states, var, dy])
 
         dx_op = CustomOp(ir=f'''
-dm5[S, H] = input0[S, H].cast(`float32`) * input3[H].cast(`float32`);
-dx_1[S, H] = dm5[S, H] / (input4[S].cast(`float32`) + const({eps}).cast(`float32`)).call(`sqrt`);
-dx_2[S, H] = input1[S].cast(`float32`) * const(2.0 / {hidden_size}).cast(`float32`) * input2[S, H].cast(`float32`);
+dm5[S, H] = input0[S, H].cast(`float32`) * input1[H].cast(`float32`);
+m0[S] +=! dm5[S, H] * input2[S, H].cast(`float32`);
+m1[S] = input3[S].cast(`float32`) + const({eps}).cast(`float32`);
+dvar[S] = m0[S] * const(-0.5).cast(`float32`) * m1[S].call(`pow`, [const(-1.5).cast(`float32`)]);
+dx_1[S, H] = dm5[S, H] / m1[S].call(`sqrt`);
+dx_2[S, H] = dvar[S].cast(`float32`) * const(2.0 / {hidden_size}).cast(`float32`) * input2[S, H].cast(`float32`);
 output0[S, H] = dx_1[S, H] + dx_2[S, H];
-''', input_orders={'input0': dy, 'input1': dvar, 'input2': hidden_states, 'input3': weights, 'input4': var}, device=device, arch="A100")
-        dx = dx_op([dy, dvar, hidden_states, weights, var])
+''', input_orders={'input0': dy, 'input1': weights, 'input2': hidden_states, 'input3': var}, device=device, arch="A100")
+        dx = dx_op([dy, weights, hidden_states, var])
 
         return dx, dw, None
 
@@ -112,7 +96,7 @@ def test_forward_time(repeat, module, *args):
         y = module(*args)
         end = time.time()
         elapsed_time += (end-start)
-    print (f"{module} forward time: {elapsed_time/repeat} sec.")
+    print (f"{module} forward time: {elapsed_time/repeat*1000} ms.")
 
 def test_backward_time(repeat, module, *args):
     warmup = 100
@@ -129,7 +113,7 @@ def test_backward_time(repeat, module, *args):
         loss.backward()
         end = time.time()
         elapsed_time += (end-start)
-    print (f"{module} backward time: {elapsed_time/repeat} sec.")
+    print (f"{module} backward time: {elapsed_time/repeat*1000} ms.")
 
 if __name__ == '__main__':
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
