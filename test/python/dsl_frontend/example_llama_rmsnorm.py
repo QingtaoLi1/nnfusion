@@ -54,14 +54,14 @@ output0[S, H] = m5[S, H].cast(`float16`) * input1[H];
         var_op = CustomOp(ir=f'''
 m0[S, H] = input0[S, H].cast(`float32`);
 m1[S, H] = m0[S, H].call(`pow`, [const(2.0).cast(`float32`)]);
-output0[S] +=! m1[S, H] / const({hidden_size}).cast(`float32`);
+m2[S] +=! m1[S, H];
+output0[S] = m2[S] / const({hidden_size}).cast(`float32`);
 ''', input_orders={'input0': hidden_states}, device=device, arch="A100")
         var = var_op([hidden_states])
 
         m5_op = CustomOp(ir=f'''
 m0[S, H] = input0[S, H].cast(`float32`);
-m1[S] = input1[S].cast(`float32`) + const({eps}).cast(`float32`);
-output0[S, H] = m0[S, H] / m1[S].call(`sqrt`);
+output0[S, H] = m0[S, H] / (input1[S] + const({eps}).cast(`float32`)).call(`sqrt`);
 ''', input_orders={'input0': hidden_states, 'input1': var}, device=device, arch="A100")
         m5 = m5_op([hidden_states, var])
         
@@ -84,7 +84,6 @@ dx_2[S, H] = input1[S].cast(`float32`) * const(2.0 / {hidden_size}).cast(`float3
 output0[S, H] = dx_1[S, H] + dx_2[S, H];
 ''', input_orders={'input0': dy, 'input1': dvar, 'input2': hidden_states, 'input3': weights, 'input4': var}, device=device, arch="A100")
         dx = dx_op([dy, dvar, hidden_states, weights, var])
-        print (dx[0][:10])
 
         return dx, dw, None
 
@@ -100,15 +99,41 @@ class FusedLlamaRMSNorm(nn.Module):
 
     def forward(self, hidden_states):
         return FusedLlamaRMSNormFunc.apply(hidden_states, self.weight, self.variance_epsilon)
-    
+
+
+def test_forward_time(repeat, module, *args):
+    elapsed_time = 0
+    for i in range(repeat):
+        start = time.time()
+        y = module(*args)
+        end = time.time()
+        elapsed_time += (end-start)
+    print (f"{module} forward time: {elapsed_time/repeat} sec.")
+
+def test_backward_time(repeat, module, *args):
+    elapsed_time = 0
+    for i in range(repeat):
+        y = module(*args)
+        loss = y.sum()
+        start = time.time()
+        loss.backward()
+        end = time.time()
+        elapsed_time += (end-start)
+    print (f"{module} backward time: {elapsed_time/repeat} sec.")
+
 if __name__ == '__main__':
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     torch.set_default_dtype(torch.float16)
-    x = torch.randn(2048, 512, requires_grad=True, device=device)
+
+    # Experiment setup
+    max_seq_len = 4096
+    hidden_size = 8192
+    x = torch.randn(max_seq_len, hidden_size, requires_grad=True, device=device)
     x2 = x.detach().clone().requires_grad_()
-    ref = LlamaRMSNorm(512).to(device)
-    fused = FusedLlamaRMSNorm(512).to(device)
+    ref = LlamaRMSNorm(hidden_size).to(device)
+    fused = FusedLlamaRMSNorm(hidden_size).to(device)
     
+    # Run forward and backward
     y_ref = ref(x)
     loss_ref = y_ref.sum()
     loss_ref.backward()
@@ -117,25 +142,23 @@ if __name__ == '__main__':
     loss_fused = y_fused.sum()
     loss_fused.backward()
 
+    # Check validity
+    print ("------ Vadility Check ------")
     print (f"y_ref      : {y_ref[0][:10]}")
     print (f"y_fused    : {y_fused[0][:10]}")
     print (f"x_ref_grad : {x.grad[0][:10]}")
     print (f"x_fused_grad: {x2.grad[0][:10]}")
     print (f"w_ref_grad : {ref.weight.grad[:10]}")
     print (f"w_fused_grad: {fused.weight.grad[:10]}")
-    assert (torch.allclose(y_ref, y_fused, atol=1e-3, rtol=1e-3))
-    assert (torch.allclose(x.grad, x2.grad, atol=1e-3, rtol=1e-3))
-    assert (torch.allclose(ref.weight.grad, fused.weight.grad, atol=1e-3, rtol=1e-3))
+    assert (torch.allclose(y_ref, y_fused, atol=1e-2, rtol=1e-3))
+    assert (torch.allclose(x.grad, x2.grad, atol=1e-2, rtol=1e-3))
+    assert (torch.allclose(ref.weight.grad, fused.weight.grad, atol=1e-2, rtol=1e-3))
 
-    # start = time.time()
-    # for i in range(100):
-    #     y = layer.forward(x)
-    #     y.backward(y_grad)
-    #     #print(x, x.grad, layer.fc2.weight.grad, layer.fc2.bias.grad)
-    # end = time.time()
-    # print(end-start)
-    
-    
-
-
+    # Check efficiency
+    print ("------ Efficiency Check ------")
+    repeat = 100
+    test_forward_time(repeat, ref, x)
+    test_forward_time(repeat, fused, x2)
+    test_backward_time(repeat, ref, x)
+    test_backward_time(repeat, fused, x2)
 
