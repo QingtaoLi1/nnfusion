@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import time
 from custom_op import CustomOp
+from test_utils import test_forward_time, test_backward_time
 
 
 class LlamaRotaryEmbedding(nn.Module):
@@ -19,7 +19,6 @@ class LlamaRotaryEmbedding(nn.Module):
         self._set_cos_sin_cache(
             seq_len=max_position_embeddings, device=self.inv_freq.device, dtype=torch.get_default_dtype()
         )
-        print ({'cos_cached': self.cos_cached.shape, 'sin_cached': self.sin_cached.shape})
 
     def _set_cos_sin_cache(self, seq_len, device, dtype):
         self.max_seq_len_cached = seq_len
@@ -55,30 +54,28 @@ class LlamaRotaryEmbedding(nn.Module):
 class FusedLlamaRotaryEmbeddingFunc(torch.autograd.Function):
     @staticmethod
     def forward(ctx, q, k, v, kv_seq_len, position_ids, unsqueeze_dim, cos_cached, sin_cached):
-        print ("WARNING!!! only support unsqueeze_dim = 1 !!!")
-        print ("WARNING!!! only support head_dim % 2 == 0 !!!")
-        print ("q\t: ", q.shape)                        # [Seq, Head, HeadDim]
-        print ("k\t: ", k.shape)                        # [Seq, Head, HeadDim]
-        print ("v\t: ", v.shape)                        # [Seq, Head, HeadDim]
-        print ("kv_seq_len\t: ", kv_seq_len)            # scalar
-        print ("position_ids\t: ", position_ids.shape)  # [Seq]
-        print ("unsqueeze_dim\t: ", unsqueeze_dim)      # scalar
-        print ("cos_cached\t: ", cos_cached.shape)      # [MaxSeqLen, Dim]
-        print ("sin_cached\t: ", sin_cached.shape)      # [MaxSeqLen, Dim]
-
         head_dim = q.shape[-1]
-        fused_op = CustomOp(ir=f'''
-m0[MaxS, D] = input3[MaxS, D] where MaxS in {kv_seq_len};
-m1[S, D] = m0[input2[S], D];
-m2[MaxS, D] = input4[MaxS, D] where MaxS in {kv_seq_len};
-m3[S, D] = m2[input2[S], D];
+        fused_q_op = CustomOp(ir=f'''
+m0[S, D] = input2[S, D] where S in {kv_seq_len};
+m1[S, D] = m0[input1[S], D];
+m2[S, D] = input3[S, D] where S in {kv_seq_len};
+m3[S, D] = m2[input1[S], D];
+
 m4[S, H, D] = (-input0[S, H, D + {head_dim // 2}]).when([D < {head_dim // 2}], input0[S, H, D - {head_dim // 2}]) where D in {head_dim};
-m5[S, H, D] = (-input1[S, H, D + {head_dim // 2}]).when([D < {head_dim // 2}], input1[S, H, D - {head_dim // 2}]) where D in {head_dim};
 output0[S, H, D] = input0[S, H, D] * m1[S, D] + m4[S, H, D] * m3[S, D];
-output1[S, H, D] = input1[S, H, D] * m1[S, D] + m5[S, H, D] * m3[S, D];
-''', input_orders={'input0': q, 'input1': k, 'input2': position_ids, 'input3': cos_cached, 'input4': sin_cached}, device=device, arch="A100")
-        q_embed, k_embed = fused_op([q, k, position_ids, cos_cached, sin_cached])
-        print ("q_embed\t: ", q_embed.shape)
+''', input_orders={'input0': q, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, device=device, arch="A100")
+        q_embed = fused_q_op([q, position_ids, cos_cached, sin_cached])
+
+        fused_k_op = CustomOp(ir=f'''
+m0[MaxS, D] = input2[MaxS, D] where MaxS in {kv_seq_len};
+m1[S, D] = m0[input1[S], D];
+m2[MaxS, D] = input3[MaxS, D] where MaxS in {kv_seq_len};
+m3[S, D] = m2[input1[S], D];
+
+m5[S, H, D] = (-input0[S, H, D + {head_dim // 2}]).when([D < {head_dim // 2}], input0[S, H, D - {head_dim // 2}]) where D in {head_dim};
+output0[S, H, D] = input0[S, H, D] * m1[S, D] + m5[S, H, D] * m3[S, D];
+''', input_orders={'input0': k, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, device=device, arch="A100")
+        k_embed = fused_k_op([k, position_ids, cos_cached, sin_cached])
 
         ctx.save_for_backward(position_ids, cos_cached, sin_cached)
         ctx.kv_seq_len = kv_seq_len
@@ -90,24 +87,33 @@ output1[S, H, D] = input1[S, H, D] * m1[S, D] + m5[S, H, D] * m3[S, D];
         position_ids, cos_cached, sin_cached = ctx.saved_tensors
         kv_seq_len = ctx.kv_seq_len
         head_dim = ctx.head_dim
-        dqk_op = CustomOp(ir=f'''
-m0[MaxS, D] = input3[MaxS, D] where MaxS in {kv_seq_len};
-m1[S, D] = m0[input2[S], D];
-m2[MaxS, D] = input4[MaxS, D] where MaxS in {kv_seq_len};
-m3[S, D] = m2[input2[S], D];
+        dq_op = CustomOp(ir=f'''
+m0[MaxS, D] = input2[MaxS, D] where MaxS in {kv_seq_len};
+m1[S, D] = m0[input1[S], D];
+m2[MaxS, D] = input3[MaxS, D] where MaxS in {kv_seq_len};
+m3[S, D] = m2[input1[S], D];
 
 m10[S, H, D] = input0[S, H, D].cast(`float32`);
-m11[S, H, D] = input1[S, H, D].cast(`float32`);
 di0a[S, H, D] = m10[S, H, D] * m1[S, D];
-di1a[S, H, D] = m11[S, H, D] * m1[S, D];
 dm4[S, H, D] = m10[S, H, D] * m3[S, D];
-dm5[S, H, D] = m11[S, H, D] * m3[S, D];
 di0b[S, H, D] = dm4[S, H, D + {head_dim // 2}].when([D < {head_dim // 2}], (-dm4[S, H, D - {head_dim // 2}])) where D in {head_dim};
-di1b[S, H, D] = dm5[S, H, D + {head_dim // 2}].when([D < {head_dim // 2}], (-dm5[S, H, D - {head_dim // 2}])) where D in {head_dim};
 output0[S, H, D] = di0a[S, H, D] + di0b[S, H, D];
-output1[S, H, D] = di1a[S, H, D] + di1b[S, H, D];
-''', input_orders={'input0': dq_embed, 'input1': dk_embed, 'input2': position_ids, 'input3': cos_cached, 'input4': sin_cached}, device=device, arch="A100")
-        dq, dk = dqk_op([dq_embed, dk_embed, position_ids, cos_cached, sin_cached])
+''', input_orders={'input0': dq_embed, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, device=device, arch="A100")
+        dq = dq_op([dq_embed, position_ids, cos_cached, sin_cached])
+
+        dk_op = CustomOp(ir=f'''
+m0[MaxS, D] = input2[MaxS, D] where MaxS in {kv_seq_len};
+m1[S, D] = m0[input1[S], D];
+m2[MaxS, D] = input3[MaxS, D] where MaxS in {kv_seq_len};
+m3[S, D] = m2[input1[S], D];
+
+m11[S, H, D] = input0[S, H, D].cast(`float32`);
+di1a[S, H, D] = m11[S, H, D] * m1[S, D];
+dm5[S, H, D] = m11[S, H, D] * m3[S, D];
+di1b[S, H, D] = dm5[S, H, D + {head_dim // 2}].when([D < {head_dim // 2}], (-dm5[S, H, D - {head_dim // 2}])) where D in {head_dim};
+output0[S, H, D] = di1a[S, H, D] + di1b[S, H, D];
+''', input_orders={'input0': dk_embed, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, device=device, arch="A100")
+        dk = dk_op([dk_embed, position_ids, cos_cached, sin_cached])
 
         return dq, dk, None, None, None, None, None, None
 
@@ -152,27 +158,54 @@ if __name__ == '__main__':
     kv_seq_len = 2048
     position_ids = torch.arange(2048, dtype=torch.long, device=device)
     unsqueeze_dim = 1
-    print ({'q': q.shape, 'k': k.shape, 'v': v.shape, 'kv_seq_len': kv_seq_len, 'position_ids': position_ids.shape, 'unsqueeze_dim': unsqueeze_dim})
+
+    print ("WARNING!!! only support unsqueeze_dim = 1 !!!")
+    print ("WARNING!!! only support head_dim % 2 == 0 !!!")
+    print ("q\t: ", q.shape)                        # [Seq, Head, HeadDim]
+    print ("k\t: ", k.shape)                        # [Seq, Head, HeadDim]
+    print ("v\t: ", v.shape)                        # [Seq, Head, HeadDim]
+    print ("kv_seq_len\t: ", kv_seq_len)            # scalar
+    print ("position_ids\t: ", position_ids.shape)  # [Seq]
+    print ("unsqueeze_dim\t: ", unsqueeze_dim)      # scalar
+    print ("cos_cached\t: ", ref.cos_cached.shape)      # [MaxSeqLen, Dim]
+    print ("sin_cached\t: ", ref.sin_cached.shape)      # [MaxSeqLen, Dim]
+
+
+    q2 = q.clone().detach().requires_grad_(True)
+    k2 = k.clone().detach().requires_grad_(True)
+    v2 = v.clone().detach().requires_grad_(True)
+    position_ids2 = position_ids.clone().detach()
+
+    # Run forward and backward
     q_embed_ref, k_embed_ref = ref(q, k, v, kv_seq_len, position_ids, unsqueeze_dim)
-    q_embed_fused, k_embed_fused = fused(q, k, v, kv_seq_len, position_ids, unsqueeze_dim)
+    loss_ref = q_embed_ref.sum() + k_embed_ref.sum()
+    loss_ref.backward()
 
-    q_embed_grad = torch.ones_like(q_embed_fused, device=device)
-    k_embed_grad = torch.ones_like(k_embed_fused, device=device)
-    q_embed_fused.backward(q_embed_grad)
-    k_embed_fused.backward(k_embed_grad)
+    q_embed_fused, k_embed_fused = fused(q2, k2, v2, kv_seq_len, position_ids2, unsqueeze_dim)
+    loss_fused = q_embed_fused.sum() + k_embed_fused.sum()
+    loss_fused.backward()
 
-    print (q_embed_ref[0][:10])
-    print (q_embed_fused[0][:10])
+    # Check validity
+    print ("------ Vadility Check ------")
+    print (f"q_embed_ref    : {q_embed_ref.flatten()[:10]}")
+    print (f"q_embed_fused  : {q_embed_fused.flatten()[:10]}")
+    print (f"k_embed_ref    : {k_embed_ref.flatten()[:10]}")
+    print (f"k_embed_fused  : {k_embed_fused.flatten()[:10]}")
+    print (f"q_ref_grad     : {q.grad.flatten()[-10:]}")    # grad of first half all 1.0.
+    print (f"q_fused_grad   : {q2.grad.flatten()[-10:]}")
+    print (f"k_ref_grad     : {k.grad.flatten()[-10:]}")
+    print (f"k_fused_grad   : {k2.grad.flatten()[-10:]}")
+    assert (torch.allclose(q_embed_ref, q_embed_fused, atol=1e-2, rtol=1e-3))
+    assert (torch.allclose(k_embed_ref, k_embed_fused, atol=1e-2, rtol=1e-3))
+    assert (torch.allclose(q.grad, q2.grad, atol=1e-2, rtol=1e-3))
+    assert (torch.allclose(k.grad, k2.grad, atol=1e-2, rtol=1e-3))
 
-    # start = time.time()
-    # for i in range(100):
-    #     y = layer.forward(x)
-    #     y.backward(y_grad)
-    #     #print(x, x.grad, layer.fc2.weight.grad, layer.fc2.bias.grad)
-    # end = time.time()
-    # print(end-start)
-    
-    
-
+    # Check efficiency
+    print ("------ Efficiency Check ------")
+    repeat = 1000
+    test_forward_time(repeat, ref, q, k, v, kv_seq_len, position_ids, unsqueeze_dim)
+    test_forward_time(repeat, fused, q2, k2, v2, kv_seq_len, position_ids2, unsqueeze_dim)
+    test_backward_time(repeat, ref, q, k, v, kv_seq_len, position_ids, unsqueeze_dim)
+    test_backward_time(repeat, fused, q2, k2, v2, kv_seq_len, position_ids2, unsqueeze_dim)
 
 

@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import time
 from custom_op import CustomOp
+from test_utils import test_forward_time, test_backward_time
 
 
 class LlamaRMSNorm(nn.Module):
@@ -84,36 +84,6 @@ class FusedLlamaRMSNorm(nn.Module):
     def forward(self, hidden_states):
         return FusedLlamaRMSNormFunc.apply(hidden_states, self.weight, self.variance_epsilon)
 
-
-def test_forward_time(repeat, module, *args):
-    warmup = 100
-    for i in range(warmup):
-        y = module(*args)
-
-    elapsed_time = 0
-    for i in range(repeat):
-        start = time.time()
-        y = module(*args)
-        end = time.time()
-        elapsed_time += (end-start)
-    print (f"{module} forward time: {elapsed_time/repeat*1000} ms.")
-
-def test_backward_time(repeat, module, *args):
-    warmup = 100
-    for i in range(warmup):
-        y = module(*args)
-        loss = y.sum()
-        loss.backward()
-        
-    elapsed_time = 0
-    for i in range(repeat):
-        y = module(*args)
-        loss = y.sum()
-        start = time.time()
-        loss.backward()
-        end = time.time()
-        elapsed_time += (end-start)
-    print (f"{module} backward time: {elapsed_time/repeat*1000} ms.")
 
 if __name__ == '__main__':
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
