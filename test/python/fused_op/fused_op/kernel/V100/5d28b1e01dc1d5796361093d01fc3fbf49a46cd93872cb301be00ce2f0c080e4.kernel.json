@@ -1,0 +1,37 @@
+[
+  {
+    "nodes": [
+      1
+    ],
+    "node_names": [
+      "fused_op_1"
+    ],
+    "group_id": 0,
+    "input_desc": [
+      [
+        1,
+        0
+      ]
+    ],
+    "output_desc": [
+      [
+        1,
+        0
+      ]
+    ],
+    "code": "__global__ void __launch_bounds__(128) Group0(half* __restrict__ input0, float* __restrict__ output0) {\n  float normal_reduce_temp0[1];\n  __shared__ float m1_shared[4096];\n  __shared__ float red_buf0[128];\n  normal_reduce_temp0[0] = 0.000000e+00f;\n  for (int H_outer = 0; H_outer < 2; ++H_outer) {\n    __syncthreads();\n    float4 __1;\n    float4 __2;\n    uint2 __3 = *(uint2*)(input0 + (((((int)blockIdx.x) * 8192) + (H_outer * 4096)) + (((int)threadIdx.x) * 4)));\n    __2.x = (float)(((half2*)(&(__3.x)))->x);\n    __2.y = (float)(((half2*)(&(__3.x)))->y);\n    __2.z = (float)(((half2*)(&(__3.y)))->x);\n    __2.w = (float)(((half2*)(&(__3.y)))->y);\n    float4 __4 = make_float4(2.000000e+00f, 2.000000e+00f, 2.000000e+00f, 2.000000e+00f);\n    __1.x = powf(__2.x, __4.x);\n    __1.y = powf(__2.y, __4.y);\n    __1.z = powf(__2.z, __4.z);\n    __1.w = powf(__2.w, __4.w);\n    *(float4*)(m1_shared + (((int)threadIdx.x) * 4)) = __1;\n    float4 __5;\n    float4 __6;\n    uint2 __7 = *(uint2*)(input0 + ((((((int)blockIdx.x) * 8192) + (H_outer * 4096)) + (((int)threadIdx.x) * 4)) + 512));\n    __6.x = (float)(((half2*)(&(__7.x)))->x);\n    __6.y = (float)(((half2*)(&(__7.x)))->y);\n    __6.z = (float)(((half2*)(&(__7.y)))->x);\n    __6.w = (float)(((half2*)(&(__7.y)))->y);\n    __5.x = powf(__6.x, __4.x);\n    __5.y = powf(__6.y, __4.y);\n    __5.z = powf(__6.z, __4.z);\n    __5.w = powf(__6.w, __4.w);\n    *(float4*)(m1_shared + ((((int)threadIdx.x) * 4) + 512)) = __5;\n    float4 __8;\n    float4 __9;\n    uint2 __10 = *(uint2*)(input0 + ((((((int)blockIdx.x) * 8192) + (H_outer * 4096)) + (((int)threadIdx.x) * 4)) + 1024));\n    __9.x = (float)(((half2*)(&(__10.x)))->x);\n    __9.y = (float)(((half2*)(&(__10.x)))->y);\n    __9.z = (float)(((half2*)(&(__10.y)))->x);\n    __9.w = (float)(((half2*)(&(__10.y)))->y);\n    __8.x = powf(__9.x, __4.x);\n    __8.y = powf(__9.y, __4.y);\n    __8.z = powf(__9.z, __4.z);\n    __8.w = powf(__9.w, __4.w);\n    *(float4*)(m1_shared + ((((int)threadIdx.x) * 4) + 1024)) = __8;\n    float4 __11;\n    float4 __12;\n    uint2 __13 = *(uint2*)(input0 + ((((((int)blockIdx.x) * 8192) + (H_outer * 4096)) + (((int)threadIdx.x) * 4)) + 1536));\n    __12.x = (float)(((half2*)(&(__13.x)))->x);\n    __12.y = (float)(((half2*)(&(__13.x)))->y);\n    __12.z = (float)(((half2*)(&(__13.y)))->x);\n    __12.w = (float)(((half2*)(&(__13.y)))->y);\n    __11.x = powf(__12.x, __4.x);\n    __11.y = powf(__12.y, __4.y);\n    __11.z = powf(__12.z, __4.z);\n    __11.w = powf(__12.w, __4.w);\n    *(float4*)(m1_shared + ((((int)threadIdx.x) * 4) + 1536)) = __11;\n    float4 __14;\n    float4 __15;\n    uint2 __16 = *(uint2*)(input0 + ((((((int)blockIdx.x) * 8192) + (H_outer * 4096)) + (((int)threadIdx.x) * 4)) + 2048));\n    __15.x = (float)(((half2*)(&(__16.x)))->x);\n    __15.y = (float)(((half2*)(&(__16.x)))->y);\n    __15.z = (float)(((half2*)(&(__16.y)))->x);\n    __15.w = (float)(((half2*)(&(__16.y)))->y);\n    __14.x = powf(__15.x, __4.x);\n    __14.y = powf(__15.y, __4.y);\n    __14.z = powf(__15.z, __4.z);\n    __14.w = powf(__15.w, __4.w);\n    *(float4*)(m1_shared + ((((int)threadIdx.x) * 4) + 2048)) = __14;\n    float4 __17;\n    float4 __18;\n    uint2 __19 = *(uint2*)(input0 + ((((((int)blockIdx.x) * 8192) + (H_outer * 4096)) + (((int)threadIdx.x) * 4)) + 2560));\n    __18.x = (float)(((half2*)(&(__19.x)))->x);\n    __18.y = (float)(((half2*)(&(__19.x)))->y);\n    __18.z = (float)(((half2*)(&(__19.y)))->x);\n    __18.w = (float)(((half2*)(&(__19.y)))->y);\n    __17.x = powf(__18.x, __4.x);\n    __17.y = powf(__18.y, __4.y);\n    __17.z = powf(__18.z, __4.z);\n    __17.w = powf(__18.w, __4.w);\n    *(float4*)(m1_shared + ((((int)threadIdx.x) * 4) + 2560)) = __17;\n    float4 __20;\n    float4 __21;\n    uint2 __22 = *(uint2*)(input0 + ((((((int)blockIdx.x) * 8192) + (H_outer * 4096)) + (((int)threadIdx.x) * 4)) + 3072));\n    __21.x = (float)(((half2*)(&(__22.x)))->x);\n    __21.y = (float)(((half2*)(&(__22.x)))->y);\n    __21.z = (float)(((half2*)(&(__22.y)))->x);\n    __21.w = (float)(((half2*)(&(__22.y)))->y);\n    __20.x = powf(__21.x, __4.x);\n    __20.y = powf(__21.y, __4.y);\n    __20.z = powf(__21.z, __4.z);\n    __20.w = powf(__21.w, __4.w);\n    *(float4*)(m1_shared + ((((int)threadIdx.x) * 4) + 3072)) = __20;\n    float4 __23;\n    float4 __24;\n    uint2 __25 = *(uint2*)(input0 + ((((((int)blockIdx.x) * 8192) + (H_outer * 4096)) + (((int)threadIdx.x) * 4)) + 3584));\n    __24.x = (float)(((half2*)(&(__25.x)))->x);\n    __24.y = (float)(((half2*)(&(__25.x)))->y);\n    __24.z = (float)(((half2*)(&(__25.y)))->x);\n    __24.w = (float)(((half2*)(&(__25.y)))->y);\n    __23.x = powf(__24.x, __4.x);\n    __23.y = powf(__24.y, __4.y);\n    __23.z = powf(__24.z, __4.z);\n    __23.w = powf(__24.w, __4.w);\n    *(float4*)(m1_shared + ((((int)threadIdx.x) * 4) + 3584)) = __23;\n    __syncthreads();\n    for (int H_inner_outer = 0; H_inner_outer < 32; ++H_inner_outer) {\n      normal_reduce_temp0[0] = (normal_reduce_temp0[0] + m1_shared[((H_inner_outer * 128) + ((int)threadIdx.x))]);\n    }\n  }\n  __syncthreads();\n  ((volatile float*)red_buf0)[((int)threadIdx.x)] = normal_reduce_temp0[0];\n  __syncthreads();\n  if (((int)threadIdx.x) < 64) {\n    ((volatile float*)red_buf0)[((int)threadIdx.x)] = (((volatile float*)red_buf0)[((int)threadIdx.x)] + ((volatile float*)red_buf0)[(((int)threadIdx.x) + 64)]);\n  }\n  __syncthreads();\n  if (((int)threadIdx.x) < 32) {\n    ((volatile float*)red_buf0)[((int)threadIdx.x)] = (((volatile float*)red_buf0)[((int)threadIdx.x)] + ((volatile float*)red_buf0)[(((int)threadIdx.x) + 32)]);\n  }\n  __syncthreads();\n  if (((int)threadIdx.x) < 16) {\n    float w_16_0 = (((volatile float*)red_buf0)[((int)threadIdx.x)] + ((volatile float*)red_buf0)[(((int)threadIdx.x) + 16)]);\n    ((volatile float*)red_buf0)[((int)threadIdx.x)] = w_16_0;\n    float w_8_0 = (((volatile float*)red_buf0)[((int)threadIdx.x)] + ((volatile float*)red_buf0)[(((int)threadIdx.x) + 8)]);\n    ((volatile float*)red_buf0)[((int)threadIdx.x)] = w_8_0;\n    float w_4_0 = (((volatile float*)red_buf0)[((int)threadIdx.x)] + ((volatile float*)red_buf0)[(((int)threadIdx.x) + 4)]);\n    ((volatile float*)red_buf0)[((int)threadIdx.x)] = w_4_0;\n    float w_2_0 = (((volatile float*)red_buf0)[((int)threadIdx.x)] + ((volatile float*)red_buf0)[(((int)threadIdx.x) + 2)]);\n    ((volatile float*)red_buf0)[((int)threadIdx.x)] = w_2_0;\n    float w_1_0 = (((volatile float*)red_buf0)[((int)threadIdx.x)] + ((volatile float*)red_buf0)[(((int)threadIdx.x) + 1)]);\n    ((volatile float*)red_buf0)[((int)threadIdx.x)] = w_1_0;\n  }\n  __syncthreads();\n  output0[((int)blockIdx.x)] = (((volatile float*)red_buf0)[0] * 1.220703e-04f);\n}\n\n",
+    "block_size": [
+      128,
+      1,
+      1
+    ],
+    "grid_size": [
+      4096,
+      1,
+      1
+    ],
+    "latency": 0.21897614002227783,
+    "name": "Group0",
+    "gain": 0
+  }
+]
