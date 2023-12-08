@@ -86,11 +86,11 @@ class FusedLlamaRMSNorm(nn.Module):
 
 if __name__ == '__main__':
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    os.environ["WELDER_ARCH"] = "V100"
+    os.environ["WELDER_ARCH"] = "A100"
     torch.set_default_dtype(torch.float16)
 
-    seq_lens = [4096]
-    hidden_sizes = [8192]
+    seq_lens = [1024]
+    hidden_sizes = [4096, 8192]
 
     for max_seq_len in seq_lens:
         for hidden_size in hidden_sizes:
