@@ -105,5 +105,9 @@ if __name__ == '__main__':
             test_forward_time(repeat, fused, x2)
             test_backward_time(repeat, ref, x)
             test_backward_time(repeat, fused, x2)
+            print ()
+
+            del x, x2, ref, fused, y_ref, y_fused, loss_ref, loss_fused
+            torch.cuda.empty_cache()
 
 
