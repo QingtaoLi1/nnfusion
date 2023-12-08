@@ -95,7 +95,7 @@ class CustomOp(torch.nn.Module):
     self.input_orders = sorted(input_list, key=lambda x: x[0])
     self.graph = generate_welder_graph(ir, input_list, extra_outputs, tags)
 
-    self.hash_key = hashlib.sha256((ir + str(input_list) + str(extra_outputs) + str(tags) + str(arch)).encode()).hexdigest()
+    self.hash_key = hashlib.sha256((ir + str(input_list) + str(extra_outputs) + str(tags)).encode()).hexdigest()
     if self.hash_key in KERNEL_CACHE:
       cache = KERNEL_CACHE[self.hash_key]
       self.custom_lib = cache.custom_lib

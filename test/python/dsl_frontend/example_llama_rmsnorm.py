@@ -86,11 +86,11 @@ class FusedLlamaRMSNorm(nn.Module):
 
 if __name__ == '__main__':
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    os.environ["WELDER_ARCH"] = "A100"
+    os.environ["WELDER_ARCH"] = "V100"
     torch.set_default_dtype(torch.float16)
 
-    seq_lens = [1024]
-    hidden_sizes = [16384]
+    seq_lens = [4096]
+    hidden_sizes = [8192]
 
     for max_seq_len in seq_lens:
         for hidden_size in hidden_sizes:
@@ -142,7 +142,3 @@ if __name__ == '__main__':
 
             del x, x2, ref, fused, y_ref, y_fused, loss_ref, loss_fused
             torch.cuda.empty_cache()
-
-            # (seq_len, hidden_size)-Start_Fail_Row
-            # Succeeded: (4096, 4096), (4096, 8192), (1024, 4096), (1024, 8192), (512, 4096), (256, 4096)
-            # Failed: (512, 8192)-256, (256, 8192)-128, (128, 4096)-64, (128, 8192)-64, (64, 4096)-16, (64, 8192)-16
