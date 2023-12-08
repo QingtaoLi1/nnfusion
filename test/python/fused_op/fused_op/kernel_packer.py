@@ -1,7 +1,7 @@
 import os
 import re
 import json
-from common_header import *
+from .common_header import *
 
 code_header = '''
 #include <cuda_runtime.h>

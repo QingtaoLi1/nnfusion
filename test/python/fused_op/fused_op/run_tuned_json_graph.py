@@ -1,6 +1,6 @@
 import json
-from ir_parser import ir_graph_parser
-from kernel_packer import pack_kernel_slices, get_kernel_metadata
+from .ir_parser import ir_graph_parser
+from .kernel_packer import pack_kernel_slices, get_kernel_metadata
 
 def get_device_source(raw_json_graph, tuned_json_graph, inputs_outputs_info=[]):
   def get_ir_from_einstein_v2(exprss):

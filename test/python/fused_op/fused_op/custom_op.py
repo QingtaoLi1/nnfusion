@@ -3,9 +3,12 @@ import hashlib
 import importlib
 import torch
 import os
-from run_tuned_json_graph import get_device_source
-from export_json_graph  import get_input_dict, construct_json_graph
+from importlib import resources
+from .run_tuned_json_graph import get_device_source
+from .export_json_graph  import get_input_dict, construct_json_graph
 
+
+package_name = "fused_op"
 
 dtype_mapping = {
       'float64': torch.float64,
@@ -38,12 +41,10 @@ def generate_welder_graph(ir, feed_list, extra_outputs, tags=""):
   return json.dumps(nodes, indent=2)
 
 
-def load_kernel(graph_path):
-  raw_model_path = graph_path
-  tuned_model_path = graph_path.strip('.json') + ".kernel.json"
-  with open(raw_model_path) as f:
+def load_kernel(arch, hash_key):
+  with resources.open_text(f"{package_name}.kernel.{arch}", f"{hash_key}.json") as f:
     raw_json_graph = json.load(f)
-  with open(tuned_model_path) as f:
+  with resources.open_text(f"{package_name}.kernel.{arch}", f"{hash_key}.kernel.json") as f:
     tuned_json_graph = json.load(f)
   
   inputs_outputs_info = []
@@ -103,20 +104,9 @@ class CustomOp(torch.nn.Module):
       self.output_list = cache.inout_info[1]
       return
       
-    graph_path = f'{os.environ["HOME"]}/.kernel/{self.hash_key}.json'
-    tuned_graph_path = f'{os.environ["HOME"]}/.kernel/{self.hash_key}.kernel.json'
-    if not os.path.exists(tuned_graph_path) or steps > 1:
-      directory = os.path.dirname(graph_path)  
-      if not os.path.exists(directory):  
-          os.makedirs(directory) 
-      with open(graph_path, 'w+') as fp:
-        fp.write(self.graph)
-      
-      cmd = f'python3.9 -m run_compiler {graph_path} {tuned_graph_path} --device 0 --topk {steps} --arch {arch}'
-      print(cmd)
-      os.system(cmd)
-      assert os.path.exists(tuned_graph_path)
-    self.custom_lib, self.custom_key, inout_info = load_kernel(graph_path)
+    graph_json_name = f"kernel/{arch}/{self.hash_key}.json"
+    tuned_json_name = f"kernel/{arch}/{self.hash_key}.kernel.json"
+    self.custom_lib, self.custom_key, inout_info = load_kernel(arch, self.hash_key)
     self.output_list = inout_info[1]
     KERNEL_CACHE[self.hash_key] = CompiledKernel(self.custom_lib, self.custom_key, inout_info)
 

@@ -1,9 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from custom_op import CustomOp
-from test_utils import test_forward_time, test_backward_time
+from .custom_op import CustomOp
+from .test_utils import test_forward_time, test_backward_time
 
+
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 class LlamaRMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-6):

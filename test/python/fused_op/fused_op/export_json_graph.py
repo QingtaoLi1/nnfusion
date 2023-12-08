@@ -4,7 +4,7 @@
 # Licensed under the MIT license.
 
 import json
-from ir_parser import ir_graph_parser
+from .ir_parser import ir_graph_parser
 
 
 def get_input_dict(input_orders):
