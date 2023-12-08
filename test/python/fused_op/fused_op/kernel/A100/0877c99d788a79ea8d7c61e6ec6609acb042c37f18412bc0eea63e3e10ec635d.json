@@ -1,0 +1,36 @@
+[
+  [
+    4,
+    "- einstein_v2(\"dm5[S, H] = input0[S, H].cast(`float32`) * input1[H].cast(`float32`); m0[S] +=! dm5[S, H] * input2[S, H].cast(`float32`); m1[S] = input3[S].cast(`float32`) + const(1e-06).cast(`float32`); dvar[S] = m0[S] * const(-0.5).cast(`float32`) * m1[S].call(`pow`, [const(-1.5).cast(`float32`)]); dx_1[S, H] = dm5[S, H] / m1[S].call(`sqrt`); dx_2[S, H] = dvar[S].cast(`float32`) * const(2.0 / 4096).cast(`float32`) * input2[S, H].cast(`float32`); output0[S, H] = dx_1[S, H] + dx_2[S, H];\", input_dict={\"input0\": {\"dtype\": \"float16\", \"shape\": [1024, 4096]}, \"input1\": {\"dtype\": \"float16\", \"shape\": [4096]}, \"input2\": {\"dtype\": \"float16\", \"shape\": [1024, 4096]}, \"input3\": {\"dtype\": \"float32\", \"shape\": [1024]}}, extra_outputs=[]) ## @: ",
+    "fused_op",
+    [
+      [
+        0,
+        0
+      ],
+      [
+        1,
+        0
+      ],
+      [
+        2,
+        0
+      ],
+      [
+        3,
+        0
+      ]
+    ]
+  ],
+  [
+    5,
+    "",
+    "Result",
+    [
+      [
+        4,
+        0
+      ]
+    ]
+  ]
+]
