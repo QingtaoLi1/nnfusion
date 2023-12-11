@@ -63,7 +63,7 @@ def test_backward_time(repeat, module, *args):
 
 if __name__ == '__main__':
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    os.environ["WELDER_ARCH"] = "V100"
+    os.environ["WELDER_ARCH"] = "A100"
     torch.set_default_dtype(torch.float16)
 
     # Experiment setup
@@ -87,7 +87,7 @@ if __name__ == '__main__':
             loss_fused.backward()
 
             # Check validity
-            print ("------ Vadility Check ------")
+            print (f"------ Vadility Check ({max_seq_len}, {hidden_size}) ------")
             print (f"y_ref      : {y_ref[0][:10]}")
             print (f"y_fused    : {y_fused[0][:10]}")
             print (f"x_ref_grad : {x.grad[0][:10]}")
