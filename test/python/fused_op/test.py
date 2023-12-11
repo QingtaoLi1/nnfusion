@@ -24,6 +24,9 @@ class LlamaRMSNorm(nn.Module):
 
 
 def test_forward_time(repeat, module, *args):
+    if isinstance(module, torch.autograd.Function):
+        module = module.apply
+
     warmup = 100
     for i in range(warmup):
         y = module(*args)
@@ -36,7 +39,11 @@ def test_forward_time(repeat, module, *args):
         elapsed_time += (end-start)
     print (f"{module} forward time: {elapsed_time/repeat*1000} ms.")
 
+
 def test_backward_time(repeat, module, *args):
+    if isinstance(module, torch.autograd.Function):
+        module = module.apply
+
     warmup = 100
     for i in range(warmup):
         y = module(*args)
@@ -69,6 +76,7 @@ if __name__ == '__main__':
     # Experiment setup
     seq_lens = [1024]
     hidden_sizes = [4096, 8192]
+    use_module = True
 
     for max_seq_len in seq_lens:
         for hidden_size in hidden_sizes:
@@ -76,45 +84,72 @@ if __name__ == '__main__':
             x2 = x.detach().clone().requires_grad_()
             ref = LlamaRMSNorm(hidden_size).to(device)
 
-            use_module = False
-            if use_module:
-                fused = FusedLlamaRMSNorm(hidden_size).to(device)
-            else:
-                weight = nn.Parameter(torch.ones(hidden_size))
-                variance_epsilon = 1e-6
-                fused = FusedLlamaRMSNormFunc.apply(x2, weight, variance_epsilon)
-
             # Run forward and backward
             y_ref = ref(x)
             loss_ref = y_ref.sum()
             loss_ref.backward()
 
-            y_fused = fused(x2)
-            loss_fused = y_fused.sum()
-            loss_fused.backward()
+            if use_module:
+                fused = FusedLlamaRMSNorm(hidden_size).to(device)
 
-            # Check validity
-            print (f"------ Vadility Check ({max_seq_len}, {hidden_size}) ------")
-            print (f"y_ref      : {y_ref[0][:10]}")
-            print (f"y_fused    : {y_fused[0][:10]}")
-            print (f"x_ref_grad : {x.grad[0][:10]}")
-            print (f"x_fused_grad: {x2.grad[0][:10]}")
-            print (f"w_ref_grad : {ref.weight.grad[:10]}")
-            print (f"w_fused_grad: {fused.weight.grad[:10]}")
-            assert (torch.allclose(y_ref, y_fused, atol=1e-2, rtol=1e-3))
-            assert (torch.allclose(x.grad, x2.grad, atol=1e-2, rtol=1e-3))
-            assert (torch.allclose(ref.weight.grad, fused.weight.grad, atol=1e-2, rtol=1e-3))
+                y_fused = fused(x2)
+                loss_fused = y_fused.sum()
+                loss_fused.backward()
 
-            # Check efficiency
-            print ("------ Efficiency Check ------")
-            repeat = 1000
-            test_forward_time(repeat, ref, x)
-            test_forward_time(repeat, fused, x2)
-            test_backward_time(repeat, ref, x)
-            test_backward_time(repeat, fused, x2)
-            print ()
+                # Check validity
+                print (f"------ Vadility Check ({max_seq_len}, {hidden_size}) ------")
+                print (f"y_ref      : {y_ref[0][:10]}")
+                print (f"y_fused    : {y_fused[0][:10]}")
+                print (f"x_ref_grad : {x.grad[0][:10]}")
+                print (f"x_fused_grad: {x2.grad[0][:10]}")
+                print (f"w_ref_grad : {ref.weight.grad[:10]}")
+                print (f"w_fused_grad: {fused.weight.grad[:10]}")
+                assert (torch.allclose(y_ref, y_fused, atol=1e-2, rtol=1e-3))
+                assert (torch.allclose(x.grad, x2.grad, atol=1e-2, rtol=1e-3))
+                assert (torch.allclose(ref.weight.grad, fused.weight.grad, atol=1e-2, rtol=1e-3))
 
-            del x, x2, ref, fused, y_ref, y_fused, loss_ref, loss_fused
-            torch.cuda.empty_cache()
+                # Check efficiency
+                print ("------ Efficiency Check ------")
+                repeat = 1000
+                test_forward_time(repeat, ref, x)
+                test_forward_time(repeat, fused, x2)
+                test_backward_time(repeat, ref, x)
+                test_backward_time(repeat, fused, x2)
+                print ()
+
+                del x, x2, ref, fused, y_ref, y_fused, loss_ref, loss_fused
+                torch.cuda.empty_cache()
+            else:
+                weight = nn.Parameter(torch.ones(hidden_size))
+                variance_epsilon = 1e-6
+                fused = FusedLlamaRMSNormFunc
+
+                y_fused = fused.apply(x2, weight, variance_epsilon)
+                loss_fused = y_fused.sum()
+                loss_fused.backward()
+
+                # Check validity
+                print (f"------ Vadility Check ({max_seq_len}, {hidden_size}) ------")
+                print (f"y_ref      : {y_ref[0][:10]}")
+                print (f"y_fused    : {y_fused[0][:10]}")
+                print (f"x_ref_grad : {x.grad[0][:10]}")
+                print (f"x_fused_grad: {x2.grad[0][:10]}")
+                print (f"w_ref_grad : {ref.weight.grad[:10]}")
+                print (f"w_fused_grad: {weight.grad[:10]}")
+                assert (torch.allclose(y_ref, y_fused, atol=1e-2, rtol=1e-3))
+                assert (torch.allclose(x.grad, x2.grad, atol=1e-2, rtol=1e-3))
+                assert (torch.allclose(ref.weight.grad, weight.grad, atol=1e-2, rtol=1e-3))
+
+                # Check efficiency
+                print ("------ Efficiency Check ------")
+                repeat = 1000
+                test_forward_time(repeat, ref, x)
+                test_forward_time(repeat, fused, x2, weight, variance_epsilon)
+                test_backward_time(repeat, ref, x)
+                test_backward_time(repeat, fused, x2, weight, variance_epsilon)
+                print ()
+
+                del x, x2, ref, y_ref, y_fused, loss_ref, loss_fused
+                torch.cuda.empty_cache()
 
 
