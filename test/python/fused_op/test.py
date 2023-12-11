@@ -75,8 +75,14 @@ if __name__ == '__main__':
             x = torch.randn(max_seq_len, hidden_size, requires_grad=True, device=device)
             x2 = x.detach().clone().requires_grad_()
             ref = LlamaRMSNorm(hidden_size).to(device)
-            # fused = FusedLlamaRMSNorm(hidden_size).to(device)
-            fused = FusedLlamaRMSNormFunc.apply(x2, fused.weight, fused.variance_epsilon)
+
+            use_module = False
+            if use_module:
+                fused = FusedLlamaRMSNorm(hidden_size).to(device)
+            else:
+                weight = nn.Parameter(torch.ones(hidden_size))
+                variance_epsilon = 1e-6
+                fused = FusedLlamaRMSNormFunc.apply(x2, weight, variance_epsilon)
 
             # Run forward and backward
             y_ref = ref(x)
