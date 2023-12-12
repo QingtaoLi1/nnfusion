@@ -51,22 +51,22 @@ output0[S, H] = m5[S, H].cast(`float16`) * input1[H];
         hidden_size = hidden_states.shape[-1]
 
         dw_op = CustomOp(ir=f'''
-m0[S, H] = input0[S, H].cast(`float32`);
-m5[S, H] = m0[S, H] / (input1[S] + const({eps}).cast(`float32`)).call(`sqrt`);
-output0[H] +=! input2[S, H].cast(`float32`) * m5[S, H].cast(`float16`);
-''', input_orders={'input0': hidden_states, 'input1': var, 'input2': dy}, device=device, arch=welder_arch)
-        dw = dw_op([hidden_states, var, dy])
+m0[S, H] = input1[S, H].cast(`float32`);
+m5[S, H] = m0[S, H] / (input2[S] + const({eps}).cast(`float32`)).call(`sqrt`);
+output0[H] +=! input0[S, H].cast(`float32`) * m5[S, H].cast(`float16`);
+''', input_orders={'input0': dy, 'input1': hidden_states, 'input2': var}, device=device, arch=welder_arch)
+        dw = dw_op([dy, hidden_states, var])
 
         dx_op = CustomOp(ir=f'''
-dm5[S, H] = input0[S, H].cast(`float32`) * input1[H].cast(`float32`);
-m0[S] +=! dm5[S, H] * input2[S, H].cast(`float32`);
+dm5[S, H] = input0[S, H].cast(`float32`) * input2[H].cast(`float32`);
+m0[S] +=! dm5[S, H] * input1[S, H].cast(`float32`);
 m1[S] = input3[S].cast(`float32`) + const({eps}).cast(`float32`);
 dvar[S] = m0[S] * const(-0.5).cast(`float32`) * m1[S].call(`pow`, [const(-1.5).cast(`float32`)]);
 dx_1[S, H] = dm5[S, H] / m1[S].call(`sqrt`);
-dx_2[S, H] = dvar[S].cast(`float32`) * const(2.0 / {hidden_size}).cast(`float32`) * input2[S, H].cast(`float32`);
+dx_2[S, H] = dvar[S].cast(`float32`) * const(2.0 / {hidden_size}).cast(`float32`) * input1[S, H].cast(`float32`);
 output0[S, H] = dx_1[S, H] + dx_2[S, H];
-''', input_orders={'input0': dy, 'input1': weights, 'input2': hidden_states, 'input3': var}, device=device, arch=welder_arch)
-        dx = dx_op([dy, weights, hidden_states, var])
+''', input_orders={'input0': dy, 'input1': hidden_states, 'input2': weights, 'input3': var}, device=device, arch=welder_arch)
+        dx = dx_op([dy, hidden_states, weights, var])
 
         return dx, dw, None
 
