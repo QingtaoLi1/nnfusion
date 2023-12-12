@@ -1,6 +1,4 @@
-import os
 import re
-import json
 from .common_header import *
 
 code_header = '''
