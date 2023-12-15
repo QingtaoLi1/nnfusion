@@ -49,7 +49,8 @@ output0[S, H] = m5[S, H].cast(`float16`) * input1[H];
         hidden_size = hidden_states.shape[-1]
 
         dw_op = CustomOp(ir=f'''
-dw[H] +=! input0[S, H].cast(`float32`) * input1[S, H].cast(`float32`) / input2[S].cast(`float16`).cast(`float32`).call(`sqrt`);
+m6[S, H] = input1[S, H].cast(`float32`) / input2[S].call(`sqrt`);
+dw[H] +=! input0[S, H].cast(`float32`) * m6[S, H].cast(`float16`);
 output0[H] = dw[H].cast(`float16`);
 ''', input_orders={'input0': dy, 'input1': hidden_states, 'input2': var}, device=device, arch=welder_arch)
         dw = dw_op([dy, hidden_states, var])
