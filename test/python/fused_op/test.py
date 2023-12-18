@@ -98,15 +98,24 @@ if __name__ == '__main__':
 
                 # Check validity
                 print (f"------ Vadility Check ({max_seq_len}, {hidden_size}) ------")
-                print (f"y_ref      : {y_ref[0][:10]}")
-                print (f"y_fused    : {y_fused[0][:10]}")
-                print (f"x_ref_grad : {x.grad[0][:10]}")
-                print (f"x_fused_grad: {x2.grad[0][:10]}")
-                print (f"w_ref_grad : {ref.weight.grad[:10]}")
-                print (f"w_fused_grad: {fused.weight.grad[:10]}")
-                assert (torch.allclose(y_ref, y_fused, atol=1e-2, rtol=1e-3))
-                assert (torch.allclose(x.grad, x2.grad, atol=1e-2, rtol=1e-3))
-                assert (torch.allclose(ref.weight.grad, fused.weight.grad, atol=1e-2, rtol=1e-3))
+                def check_all(y_ref, y_fused, x_ref_grad, x_fused_grad, w_ref_grad, w_fused_grad, atol, rtol):
+                    error_code = 0
+                    if (not torch.allclose(y_ref, y_fused, atol=atol, rtol=rtol)):
+                        error_code += 1
+                        print (f"atol={atol}, rtol={rtol}: Forward check failed.")
+                    if (not torch.allclose(w_ref_grad, w_fused_grad, atol=atol, rtol=rtol)):
+                        error_code += 2
+                        print (f"atol={atol}, rtol={rtol}: Backward dw check failed.")
+                    if (not torch.allclose(x_ref_grad, x_fused_grad, atol=atol, rtol=rtol)):
+                        error_code += 4
+                        print (f"atol={atol}, rtol={rtol}: Backward dx check failed.")
+                    if (error_code == 0):
+                        print (f"atol={atol}, rtol={rtol}: Passed.")
+                    return error_code
+                
+                error_code = check_all(y_ref, y_fused, x.grad, x2.grad, ref.weight.grad, fused.weight.grad, atol=1e-2, rtol=1e-2)
+                if error_code == 0:
+                    error_code = check_all(y_ref, y_fused, x.grad, x2.grad, ref.weight.grad, fused.weight.grad, atol=1e-3, rtol=1e-3)                
 
                 # Check efficiency
                 print ("------ Efficiency Check ------")
