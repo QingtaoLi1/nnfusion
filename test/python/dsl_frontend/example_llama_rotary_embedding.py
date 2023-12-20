@@ -149,63 +149,71 @@ class FusedLlamaRotaryEmbedding(nn.Module):
 if __name__ == '__main__':
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     torch.set_default_dtype(torch.float16)
-    ref = LlamaRotaryEmbedding(64).to(device)
-    fused = FusedLlamaRotaryEmbedding(64).to(device)
     
-    q = torch.randn(2048, 8, 64, requires_grad=True, device=device)
-    k = torch.randn(2048, 8, 64, requires_grad=True, device=device)
-    v = torch.randn(2048, 8, 64, requires_grad=True, device=device)
-    kv_seq_len = 2048
-    position_ids = torch.arange(2048, dtype=torch.long, device=device)
-    unsqueeze_dim = 1
+    max_seq_lens = 1024
+    seq_lens = [64, 128, 256, 512, 1024]
+    q_kv_hidden_sizes = [(4096, 4096), (8192, 1024)]
+    head_dim = 128
+    for seq_len in seq_lens:
+        for (q_hidden_size, kv_hidden_size) in q_kv_hidden_sizes:
+            q_num_head = q_hidden_size // head_dim
+            kv_num_head = kv_hidden_size // head_dim
+            unsqueeze_dim = 1
 
-    print ("WARNING!!! only support unsqueeze_dim = 1 !!!")
-    print ("WARNING!!! only support head_dim % 2 == 0 !!!")
-    print ("q\t: ", q.shape)                        # [Seq, Head, HeadDim]
-    print ("k\t: ", k.shape)                        # [Seq, Head, HeadDim]
-    print ("v\t: ", v.shape)                        # [Seq, Head, HeadDim]
-    print ("kv_seq_len\t: ", kv_seq_len)            # scalar
-    print ("position_ids\t: ", position_ids.shape)  # [Seq]
-    print ("unsqueeze_dim\t: ", unsqueeze_dim)      # scalar
-    print ("cos_cached\t: ", ref.cos_cached.shape)      # [MaxSeqLen, Dim]
-    print ("sin_cached\t: ", ref.sin_cached.shape)      # [MaxSeqLen, Dim]
+            ref = LlamaRotaryEmbedding(head_dim).to(device)
+            fused = FusedLlamaRotaryEmbedding(head_dim).to(device)
+            q = torch.randn(q_hidden_size, q_num_head, head_dim, requires_grad=True, device=device)
+            k = torch.randn(kv_hidden_size, kv_num_head, head_dim, requires_grad=True, device=device)
+            v = torch.randn(kv_hidden_size, kv_num_head, head_dim, requires_grad=True, device=device)
+            position_ids = torch.arange(seq_len, dtype=torch.long, device=device)
+
+            print ("WARNING!!! only support unsqueeze_dim = 1 !!!")
+            print ("WARNING!!! only support head_dim % 2 == 0 !!!")
+            print ("q\t: ", q.shape)                        # [Seq, Head, HeadDim]
+            print ("k\t: ", k.shape)                        # [Seq, Head, HeadDim]
+            print ("v\t: ", v.shape)                        # [Seq, Head, HeadDim]
+            print ("kv_seq_len\t: ", seq_len)               # scalar
+            print ("position_ids\t: ", position_ids.shape)  # [Seq]
+            print ("unsqueeze_dim\t: ", unsqueeze_dim)      # scalar
+            print ("cos_cached\t: ", ref.cos_cached.shape)      # [MaxSeqLen, Dim]
+            print ("sin_cached\t: ", ref.sin_cached.shape)      # [MaxSeqLen, Dim]
 
 
-    q2 = q.clone().detach().requires_grad_(True)
-    k2 = k.clone().detach().requires_grad_(True)
-    v2 = v.clone().detach().requires_grad_(True)
-    position_ids2 = position_ids.clone().detach()
+            q2 = q.clone().detach().requires_grad_(True)
+            k2 = k.clone().detach().requires_grad_(True)
+            v2 = v.clone().detach().requires_grad_(True)
+            position_ids2 = position_ids.clone().detach()
 
-    # Run forward and backward
-    q_embed_ref, k_embed_ref = ref(q, k, v, kv_seq_len, position_ids, unsqueeze_dim)
-    loss_ref = q_embed_ref.sum() + k_embed_ref.sum()
-    loss_ref.backward()
+            # Run forward and backward
+            q_embed_ref, k_embed_ref = ref(q, k, v, seq_len, position_ids, unsqueeze_dim)
+            loss_ref = q_embed_ref.sum() + k_embed_ref.sum()
+            loss_ref.backward()
 
-    q_embed_fused, k_embed_fused = fused(q2, k2, v2, kv_seq_len, position_ids2, unsqueeze_dim)
-    loss_fused = q_embed_fused.sum() + k_embed_fused.sum()
-    loss_fused.backward()
+            q_embed_fused, k_embed_fused = fused(q2, k2, v2, seq_len, position_ids2, unsqueeze_dim)
+            loss_fused = q_embed_fused.sum() + k_embed_fused.sum()
+            loss_fused.backward()
 
-    # Check validity
-    print ("------ Vadility Check ------")
-    print (f"q_embed_ref    : {q_embed_ref.flatten()[:10]}")
-    print (f"q_embed_fused  : {q_embed_fused.flatten()[:10]}")
-    print (f"k_embed_ref    : {k_embed_ref.flatten()[:10]}")
-    print (f"k_embed_fused  : {k_embed_fused.flatten()[:10]}")
-    print (f"q_ref_grad     : {q.grad.flatten()[-10:]}")    # grad of first half all 1.0.
-    print (f"q_fused_grad   : {q2.grad.flatten()[-10:]}")
-    print (f"k_ref_grad     : {k.grad.flatten()[-10:]}")
-    print (f"k_fused_grad   : {k2.grad.flatten()[-10:]}")
-    assert (torch.allclose(q_embed_ref, q_embed_fused, atol=1e-2, rtol=1e-3))
-    assert (torch.allclose(k_embed_ref, k_embed_fused, atol=1e-2, rtol=1e-3))
-    assert (torch.allclose(q.grad, q2.grad, atol=1e-2, rtol=1e-3))
-    assert (torch.allclose(k.grad, k2.grad, atol=1e-2, rtol=1e-3))
+            # Check validity
+            print ("------ Vadility Check ------")
+            print (f"q_embed_ref    : {q_embed_ref.flatten()[:10]}")
+            print (f"q_embed_fused  : {q_embed_fused.flatten()[:10]}")
+            print (f"k_embed_ref    : {k_embed_ref.flatten()[:10]}")
+            print (f"k_embed_fused  : {k_embed_fused.flatten()[:10]}")
+            print (f"q_ref_grad     : {q.grad.flatten()[-10:]}")    # grad of first half all 1.0.
+            print (f"q_fused_grad   : {q2.grad.flatten()[-10:]}")
+            print (f"k_ref_grad     : {k.grad.flatten()[-10:]}")
+            print (f"k_fused_grad   : {k2.grad.flatten()[-10:]}")
+            assert (torch.allclose(q_embed_ref, q_embed_fused, atol=1e-2, rtol=1e-3))
+            assert (torch.allclose(k_embed_ref, k_embed_fused, atol=1e-2, rtol=1e-3))
+            assert (torch.allclose(q.grad, q2.grad, atol=1e-2, rtol=1e-3))
+            assert (torch.allclose(k.grad, k2.grad, atol=1e-2, rtol=1e-3))
 
-    # Check efficiency
-    print ("------ Efficiency Check ------")
-    repeat = 1000
-    test_forward_time(repeat, ref, q, k, v, kv_seq_len, position_ids, unsqueeze_dim)
-    test_forward_time(repeat, fused, q2, k2, v2, kv_seq_len, position_ids2, unsqueeze_dim)
-    test_backward_time(repeat, ref, q, k, v, kv_seq_len, position_ids, unsqueeze_dim)
-    test_backward_time(repeat, fused, q2, k2, v2, kv_seq_len, position_ids2, unsqueeze_dim)
+            # Check efficiency
+            print ("------ Efficiency Check ------")
+            repeat = 1000
+            test_forward_time(repeat, ref, q, k, v, seq_len, position_ids, unsqueeze_dim)
+            test_forward_time(repeat, fused, q2, k2, v2, seq_len, position_ids2, unsqueeze_dim)
+            test_backward_time(repeat, ref, q, k, v, seq_len, position_ids, unsqueeze_dim)
+            test_backward_time(repeat, fused, q2, k2, v2, seq_len, position_ids2, unsqueeze_dim)
 
 

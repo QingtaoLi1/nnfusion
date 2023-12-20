@@ -1,0 +1,45 @@
+[
+  {
+    "nodes": [
+      3
+    ],
+    "node_names": [
+      "fused_op_3"
+    ],
+    "group_id": 0,
+    "input_desc": [
+      [
+        3,
+        0
+      ],
+      [
+        3,
+        1
+      ],
+      [
+        3,
+        2
+      ]
+    ],
+    "output_desc": [
+      [
+        3,
+        0
+      ]
+    ],
+    "code": "__global__ void __launch_bounds__(128) Group0(half* __restrict__ input0, half* __restrict__ input1, half* __restrict__ input2, float* __restrict__ m8) {\n  \n  float normal_reduce_temp0[1];\n  __shared__ half input0_shared[4096];\n  __shared__ half input2_shared[1024];\n  __shared__ half input1_shared[4096];\n  float red_buf0[1];\n  normal_reduce_temp0[0] = 0.000000e+00f;\n  for (int H_outer = 0; H_outer < 8; ++H_outer) {\n    __syncthreads();\n    *(uint4*)(input0_shared + ((((int)threadIdx.y) * 256) + (((int)threadIdx.x) * 8))) = *(uint4*)(input0 + ((((((int)blockIdx.x) * 32768) + (H_outer * 1024)) + (((int)threadIdx.y) * 256)) + (((int)threadIdx.x) * 8)));\n    *(uint4*)(input0_shared + (((((int)threadIdx.y) * 256) + (((int)threadIdx.x) * 8)) + 1024)) = *(uint4*)(input0 + (((((((int)blockIdx.x) * 32768) + (H_outer * 1024)) + (((int)threadIdx.y) * 256)) + (((int)threadIdx.x) * 8)) + 8192));\n    *(uint4*)(input0_shared + (((((int)threadIdx.y) * 256) + (((int)threadIdx.x) * 8)) + 2048)) = *(uint4*)(input0 + (((((((int)blockIdx.x) * 32768) + (H_outer * 1024)) + (((int)threadIdx.y) * 256)) + (((int)threadIdx.x) * 8)) + 16384));\n    *(uint4*)(input0_shared + (((((int)threadIdx.y) * 256) + (((int)threadIdx.x) * 8)) + 3072)) = *(uint4*)(input0 + (((((((int)blockIdx.x) * 32768) + (H_outer * 1024)) + (((int)threadIdx.y) * 256)) + (((int)threadIdx.x) * 8)) + 24576));\n    *(uint4*)(input2_shared + ((((int)threadIdx.y) * 256) + (((int)threadIdx.x) * 8))) = *(uint4*)(input2 + (((H_outer * 1024) + (((int)threadIdx.y) * 256)) + (((int)threadIdx.x) * 8)));\n    *(uint4*)(input1_shared + ((((int)threadIdx.y) * 256) + (((int)threadIdx.x) * 8))) = *(uint4*)(input1 + ((((((int)blockIdx.x) * 32768) + (H_outer * 1024)) + (((int)threadIdx.y) * 256)) + (((int)threadIdx.x) * 8)));\n    *(uint4*)(input1_shared + (((((int)threadIdx.y) * 256) + (((int)threadIdx.x) * 8)) + 1024)) = *(uint4*)(input1 + (((((((int)blockIdx.x) * 32768) + (H_outer * 1024)) + (((int)threadIdx.y) * 256)) + (((int)threadIdx.x) * 8)) + 8192));\n    *(uint4*)(input1_shared + (((((int)threadIdx.y) * 256) + (((int)threadIdx.x) * 8)) + 2048)) = *(uint4*)(input1 + (((((((int)blockIdx.x) * 32768) + (H_outer * 1024)) + (((int)threadIdx.y) * 256)) + (((int)threadIdx.x) * 8)) + 16384));\n    *(uint4*)(input1_shared + (((((int)threadIdx.y) * 256) + (((int)threadIdx.x) * 8)) + 3072)) = *(uint4*)(input1 + (((((((int)blockIdx.x) * 32768) + (H_outer * 1024)) + (((int)threadIdx.y) * 256)) + (((int)threadIdx.x) * 8)) + 24576));\n    __syncthreads();\n    for (int H_inner_outer = 0; H_inner_outer < 32; ++H_inner_outer) {\n      normal_reduce_temp0[0] = (normal_reduce_temp0[0] + (((float)(input0_shared[(((((int)threadIdx.y) * 1024) + (H_inner_outer * 32)) + ((int)threadIdx.x))] * input2_shared[((H_inner_outer * 32) + ((int)threadIdx.x))])) * ((float)input1_shared[(((((int)threadIdx.y) * 1024) + (H_inner_outer * 32)) + ((int)threadIdx.x))])));\n    }\n  }\n  uint mask[1];\n  float t0[1];\n  red_buf0[0] = normal_reduce_temp0[0];\n  mask[0] = (__activemask() & ((uint)(0 << (((int)threadIdx.y) * 32))));\n  t0[0] = __shfl_down_sync(mask[0], red_buf0[0], 16, 32);\n  red_buf0[0] = (red_buf0[0] + t0[0]);\n  t0[0] = __shfl_down_sync(mask[0], red_buf0[0], 8, 32);\n  red_buf0[0] = (red_buf0[0] + t0[0]);\n  t0[0] = __shfl_down_sync(mask[0], red_buf0[0], 4, 32);\n  red_buf0[0] = (red_buf0[0] + t0[0]);\n  t0[0] = __shfl_down_sync(mask[0], red_buf0[0], 2, 32);\n  red_buf0[0] = (red_buf0[0] + t0[0]);\n  t0[0] = __shfl_down_sync(mask[0], red_buf0[0], 1, 32);\n  red_buf0[0] = (red_buf0[0] + t0[0]);\n  red_buf0[0] = __shfl_sync(mask[0], red_buf0[0], (((int)threadIdx.y) * 32), 32);\n  m8[((((int)blockIdx.x) * 4) + ((int)threadIdx.y))] = red_buf0[0];\n}\n\n",
+    "block_size": [
+      32,
+      4,
+      1
+    ],
+    "grid_size": [
+      256,
+      1,
+      1
+    ],
+    "latency": 0.022236434742808342,
+    "name": "Group0",
+    "gain": 0
+  }
+]

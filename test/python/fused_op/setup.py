@@ -3,7 +3,7 @@ import setuptools
 
 setuptools.setup(
     name="fused_op",
-    version="0.1.1",
+    version="0.2.1",
     author="Qingtao Li",
     author_email="qingtaoli@microsoft.com",
     description="A test package of fused operations.",

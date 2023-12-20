@@ -6,7 +6,7 @@ from test_utils import test_forward_time, test_backward_time
 
 
 class LlamaRMSNorm(nn.Module):
-    def __init__(self, hidden_size, eps=1e-6):
+    def __init__(self, hidden_size, eps=1e-5):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(hidden_size))
         self.variance_epsilon = eps
@@ -73,7 +73,7 @@ output0[S, H] = dx[S, H].cast(`float16`);
         return dx, dw, None
 
 class FusedLlamaRMSNorm(nn.Module):
-    def __init__(self, hidden_size, eps=1e-6):
+    def __init__(self, hidden_size, eps=1e-5):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(hidden_size))
         self.variance_epsilon = eps
@@ -91,7 +91,7 @@ if __name__ == '__main__':
     os.environ["WELDER_ARCH"] = "A100"
     torch.set_default_dtype(torch.float16)
 
-    seq_lens = [64, 128, 256, 512, 1024, 2048]
+    seq_lens = [64, 128, 256, 512, 1024]
     hidden_sizes = [4096, 8192]
 
     for max_seq_len in seq_lens:

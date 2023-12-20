@@ -1,0 +1,45 @@
+[
+  {
+    "nodes": [
+      3
+    ],
+    "node_names": [
+      "fused_op_3"
+    ],
+    "group_id": 0,
+    "input_desc": [
+      [
+        3,
+        0
+      ],
+      [
+        3,
+        1
+      ],
+      [
+        3,
+        2
+      ]
+    ],
+    "output_desc": [
+      [
+        3,
+        0
+      ]
+    ],
+    "code": "__global__ void __launch_bounds__(128) Group0(half* __restrict__ input0, half* __restrict__ input1, half* __restrict__ input2, float* __restrict__ m8) {\n  \n  float normal_reduce_temp0[1];\n  __shared__ half input0_shared[4096];\n  __shared__ half input2_shared[4096];\n  __shared__ half input1_shared[4096];\n  __shared__ float red_buf0[128];\n  normal_reduce_temp0[0] = 0.000000e+00f;\n  for (int H_outer = 0; H_outer < 2; ++H_outer) {\n    __syncthreads();\n    *(uint4*)(input0_shared + (((int)threadIdx.x) * 8)) = *(uint4*)(input0 + (((((int)blockIdx.x) * 8192) + (H_outer * 4096)) + (((int)threadIdx.x) * 8)));\n    *(uint4*)(input0_shared + ((((int)threadIdx.x) * 8) + 1024)) = *(uint4*)(input0 + ((((((int)blockIdx.x) * 8192) + (H_outer * 4096)) + (((int)threadIdx.x) * 8)) + 1024));\n    *(uint4*)(input0_shared + ((((int)threadIdx.x) * 8) + 2048)) = *(uint4*)(input0 + ((((((int)blockIdx.x) * 8192) + (H_outer * 4096)) + (((int)threadIdx.x) * 8)) + 2048));\n    *(uint4*)(input0_shared + ((((int)threadIdx.x) * 8) + 3072)) = *(uint4*)(input0 + ((((((int)blockIdx.x) * 8192) + (H_outer * 4096)) + (((int)threadIdx.x) * 8)) + 3072));\n    *(uint4*)(input2_shared + (((int)threadIdx.x) * 8)) = *(uint4*)(input2 + ((H_outer * 4096) + (((int)threadIdx.x) * 8)));\n    *(uint4*)(input2_shared + ((((int)threadIdx.x) * 8) + 1024)) = *(uint4*)(input2 + (((H_outer * 4096) + (((int)threadIdx.x) * 8)) + 1024));\n    *(uint4*)(input2_shared + ((((int)threadIdx.x) * 8) + 2048)) = *(uint4*)(input2 + (((H_outer * 4096) + (((int)threadIdx.x) * 8)) + 2048));\n    *(uint4*)(input2_shared + ((((int)threadIdx.x) * 8) + 3072)) = *(uint4*)(input2 + (((H_outer * 4096) + (((int)threadIdx.x) * 8)) + 3072));\n    *(uint4*)(input1_shared + (((int)threadIdx.x) * 8)) = *(uint4*)(input1 + (((((int)blockIdx.x) * 8192) + (H_outer * 4096)) + (((int)threadIdx.x) * 8)));\n    *(uint4*)(input1_shared + ((((int)threadIdx.x) * 8) + 1024)) = *(uint4*)(input1 + ((((((int)blockIdx.x) * 8192) + (H_outer * 4096)) + (((int)threadIdx.x) * 8)) + 1024));\n    *(uint4*)(input1_shared + ((((int)threadIdx.x) * 8) + 2048)) = *(uint4*)(input1 + ((((((int)blockIdx.x) * 8192) + (H_outer * 4096)) + (((int)threadIdx.x) * 8)) + 2048));\n    *(uint4*)(input1_shared + ((((int)threadIdx.x) * 8) + 3072)) = *(uint4*)(input1 + ((((((int)blockIdx.x) * 8192) + (H_outer * 4096)) + (((int)threadIdx.x) * 8)) + 3072));\n    __syncthreads();\n    for (int H_inner_outer = 0; H_inner_outer < 32; ++H_inner_outer) {\n      normal_reduce_temp0[0] = (normal_reduce_temp0[0] + (((float)(input0_shared[((H_inner_outer * 128) + ((int)threadIdx.x))] * input2_shared[((H_inner_outer * 128) + ((int)threadIdx.x))])) * ((float)input1_shared[((H_inner_outer * 128) + ((int)threadIdx.x))])));\n    }\n  }\n  __syncthreads();\n  ((volatile float*)red_buf0)[((int)threadIdx.x)] = normal_reduce_temp0[0];\n  __syncthreads();\n  if (((int)threadIdx.x) < 64) {\n    ((volatile float*)red_buf0)[((int)threadIdx.x)] = (((volatile float*)red_buf0)[((int)threadIdx.x)] + ((volatile float*)red_buf0)[(((int)threadIdx.x) + 64)]);\n  }\n  __syncthreads();\n  if (((int)threadIdx.x) < 32) {\n    ((volatile float*)red_buf0)[((int)threadIdx.x)] = (((volatile float*)red_buf0)[((int)threadIdx.x)] + ((volatile float*)red_buf0)[(((int)threadIdx.x) + 32)]);\n  }\n  __syncthreads();\n  if (((int)threadIdx.x) < 16) {\n    float w_16_0 = (((volatile float*)red_buf0)[((int)threadIdx.x)] + ((volatile float*)red_buf0)[(((int)threadIdx.x) + 16)]);\n    ((volatile float*)red_buf0)[((int)threadIdx.x)] = w_16_0;\n    float w_8_0 = (((volatile float*)red_buf0)[((int)threadIdx.x)] + ((volatile float*)red_buf0)[(((int)threadIdx.x) + 8)]);\n    ((volatile float*)red_buf0)[((int)threadIdx.x)] = w_8_0;\n    float w_4_0 = (((volatile float*)red_buf0)[((int)threadIdx.x)] + ((volatile float*)red_buf0)[(((int)threadIdx.x) + 4)]);\n    ((volatile float*)red_buf0)[((int)threadIdx.x)] = w_4_0;\n    float w_2_0 = (((volatile float*)red_buf0)[((int)threadIdx.x)] + ((volatile float*)red_buf0)[(((int)threadIdx.x) + 2)]);\n    ((volatile float*)red_buf0)[((int)threadIdx.x)] = w_2_0;\n    float w_1_0 = (((volatile float*)red_buf0)[((int)threadIdx.x)] + ((volatile float*)red_buf0)[(((int)threadIdx.x) + 1)]);\n    ((volatile float*)red_buf0)[((int)threadIdx.x)] = w_1_0;\n  }\n  __syncthreads();\n  m8[((int)blockIdx.x)] = ((volatile float*)red_buf0)[0];\n}\n\n",
+    "block_size": [
+      128,
+      1,
+      1
+    ],
+    "grid_size": [
+      64,
+      1,
+      1
+    ],
+    "latency": 0.0054518976248800755,
+    "name": "Group0",
+    "gain": 0
+  }
+]

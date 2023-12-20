@@ -1,0 +1,32 @@
+[
+  [
+    3,
+    "- einstein_v2(\"m0[S, H] = input0[S, H].cast(`float32`); m5[S, H] = m0[S, H] / input2[S].call(`sqrt`); output0[S, H] = m5[S, H].cast(`float16`) * input1[H];\", input_dict={\"input0\": {\"dtype\": \"float16\", \"shape\": [64, 8192]}, \"input1\": {\"dtype\": \"float16\", \"shape\": [8192]}, \"input2\": {\"dtype\": \"float32\", \"shape\": [64]}}, extra_outputs=[]) ## @: ",
+    "fused_op",
+    [
+      [
+        0,
+        0
+      ],
+      [
+        1,
+        0
+      ],
+      [
+        2,
+        0
+      ]
+    ]
+  ],
+  [
+    4,
+    "",
+    "Result",
+    [
+      [
+        3,
+        0
+      ]
+    ]
+  ]
+]

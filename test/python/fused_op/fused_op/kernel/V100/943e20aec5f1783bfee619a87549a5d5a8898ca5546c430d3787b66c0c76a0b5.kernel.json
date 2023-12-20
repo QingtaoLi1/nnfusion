@@ -1,0 +1,45 @@
+[
+  {
+    "nodes": [
+      3
+    ],
+    "node_names": [
+      "fused_op_3"
+    ],
+    "group_id": 0,
+    "input_desc": [
+      [
+        3,
+        0
+      ],
+      [
+        3,
+        1
+      ],
+      [
+        3,
+        2
+      ]
+    ],
+    "output_desc": [
+      [
+        3,
+        0
+      ]
+    ],
+    "code": "__global__ void __launch_bounds__(128) Group0(half* __restrict__ input0, half* __restrict__ input1, float* __restrict__ input2, half* __restrict__ output0) {\n  \n  __shared__ float input2_shared[16];\n  __shared__ half input1_shared[64];\n  if (((int)threadIdx.x) < 16) {\n    input2_shared[((int)threadIdx.x)] = input2[(((((int)blockIdx.x) >> 6) * 16) + ((int)threadIdx.x))];\n  }\n  if (((int)threadIdx.x) < 64) {\n    input1_shared[((int)threadIdx.x)] = input1[(((((int)blockIdx.x) & 63) * 64) + ((int)threadIdx.x))];\n  }\n  __syncthreads();\n  output0[(((((((int)blockIdx.x) >> 6) * 65536) + ((((int)threadIdx.x) >> 4) * 4096)) + ((((int)blockIdx.x) & 63) * 64)) + ((((int)threadIdx.x) & 15) * 2))] = (((half)(((float)input0[(((((((int)blockIdx.x) >> 6) * 65536) + ((((int)threadIdx.x) >> 4) * 4096)) + ((((int)blockIdx.x) & 63) * 64)) + ((((int)threadIdx.x) & 15) * 2))]) / sqrtf(input2_shared[(((int)threadIdx.x) >> 4)]))) * input1_shared[((((int)threadIdx.x) & 15) * 2)]);\n  output0[((((((((int)blockIdx.x) >> 6) * 65536) + ((((int)threadIdx.x) >> 4) * 4096)) + ((((int)blockIdx.x) & 63) * 64)) + ((((int)threadIdx.x) & 15) * 2)) + 32)] = (((half)(((float)input0[((((((((int)blockIdx.x) >> 6) * 65536) + ((((int)threadIdx.x) >> 4) * 4096)) + ((((int)blockIdx.x) & 63) * 64)) + ((((int)threadIdx.x) & 15) * 2)) + 32)]) / sqrtf(input2_shared[(((int)threadIdx.x) >> 4)]))) * input1_shared[(((((int)threadIdx.x) & 15) * 2) + 32)]);\n  output0[((((((((int)blockIdx.x) >> 6) * 65536) + ((((int)threadIdx.x) >> 4) * 4096)) + ((((int)blockIdx.x) & 63) * 64)) + ((((int)threadIdx.x) & 15) * 2)) + 32768)] = (((half)(((float)input0[((((((((int)blockIdx.x) >> 6) * 65536) + ((((int)threadIdx.x) >> 4) * 4096)) + ((((int)blockIdx.x) & 63) * 64)) + ((((int)threadIdx.x) & 15) * 2)) + 32768)]) / sqrtf(input2_shared[((((int)threadIdx.x) >> 4) + 8)]))) * input1_shared[((((int)threadIdx.x) & 15) * 2)]);\n  output0[((((((((int)blockIdx.x) >> 6) * 65536) + ((((int)threadIdx.x) >> 4) * 4096)) + ((((int)blockIdx.x) & 63) * 64)) + ((((int)threadIdx.x) & 15) * 2)) + 32800)] = (((half)(((float)input0[((((((((int)blockIdx.x) >> 6) * 65536) + ((((int)threadIdx.x) >> 4) * 4096)) + ((((int)blockIdx.x) & 63) * 64)) + ((((int)threadIdx.x) & 15) * 2)) + 32800)]) / sqrtf(input2_shared[((((int)threadIdx.x) >> 4) + 8)]))) * input1_shared[(((((int)threadIdx.x) & 15) * 2) + 32)]);\n  output0[((((((((int)blockIdx.x) >> 6) * 65536) + ((((int)threadIdx.x) >> 4) * 4096)) + ((((int)blockIdx.x) & 63) * 64)) + ((((int)threadIdx.x) & 15) * 2)) + 1)] = (((half)(((float)input0[((((((((int)blockIdx.x) >> 6) * 65536) + ((((int)threadIdx.x) >> 4) * 4096)) + ((((int)blockIdx.x) & 63) * 64)) + ((((int)threadIdx.x) & 15) * 2)) + 1)]) / sqrtf(input2_shared[(((int)threadIdx.x) >> 4)]))) * input1_shared[(((((int)threadIdx.x) & 15) * 2) + 1)]);\n  output0[((((((((int)blockIdx.x) >> 6) * 65536) + ((((int)threadIdx.x) >> 4) * 4096)) + ((((int)blockIdx.x) & 63) * 64)) + ((((int)threadIdx.x) & 15) * 2)) + 33)] = (((half)(((float)input0[((((((((int)blockIdx.x) >> 6) * 65536) + ((((int)threadIdx.x) >> 4) * 4096)) + ((((int)blockIdx.x) & 63) * 64)) + ((((int)threadIdx.x) & 15) * 2)) + 33)]) / sqrtf(input2_shared[(((int)threadIdx.x) >> 4)]))) * input1_shared[(((((int)threadIdx.x) & 15) * 2) + 33)]);\n  output0[((((((((int)blockIdx.x) >> 6) * 65536) + ((((int)threadIdx.x) >> 4) * 4096)) + ((((int)blockIdx.x) & 63) * 64)) + ((((int)threadIdx.x) & 15) * 2)) + 32769)] = (((half)(((float)input0[((((((((int)blockIdx.x) >> 6) * 65536) + ((((int)threadIdx.x) >> 4) * 4096)) + ((((int)blockIdx.x) & 63) * 64)) + ((((int)threadIdx.x) & 15) * 2)) + 32769)]) / sqrtf(input2_shared[((((int)threadIdx.x) >> 4) + 8)]))) * input1_shared[(((((int)threadIdx.x) & 15) * 2) + 1)]);\n  output0[((((((((int)blockIdx.x) >> 6) * 65536) + ((((int)threadIdx.x) >> 4) * 4096)) + ((((int)blockIdx.x) & 63) * 64)) + ((((int)threadIdx.x) & 15) * 2)) + 32801)] = (((half)(((float)input0[((((((((int)blockIdx.x) >> 6) * 65536) + ((((int)threadIdx.x) >> 4) * 4096)) + ((((int)blockIdx.x) & 63) * 64)) + ((((int)threadIdx.x) & 15) * 2)) + 32801)]) / sqrtf(input2_shared[((((int)threadIdx.x) >> 4) + 8)]))) * input1_shared[(((((int)threadIdx.x) & 15) * 2) + 33)]);\n}\n\n",
+    "block_size": [
+      128,
+      1,
+      1
+    ],
+    "grid_size": [
+      4096,
+      1,
+      1
+    ],
+    "latency": 0.014226887375116348,
+    "name": "Group0",
+    "gain": 0
+  }
+]

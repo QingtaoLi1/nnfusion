@@ -102,8 +102,6 @@ class CustomOp(torch.nn.Module):
       self.output_list = cache.inout_info[1]
       return
       
-    graph_json_name = f"kernel/{arch}/{self.hash_key}.json"
-    tuned_json_name = f"kernel/{arch}/{self.hash_key}.kernel.json"
     self.custom_lib, self.custom_key, inout_info = load_kernel(arch, self.hash_key)
     self.output_list = inout_info[1]
     KERNEL_CACHE[self.hash_key] = CompiledKernel(self.custom_lib, self.custom_key, inout_info)
