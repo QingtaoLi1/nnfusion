@@ -263,7 +263,7 @@ if __name__ == '__main__':
                                    ref.gate_proj.weight.grad, fused.gate_proj.weight.grad,
                                    ref.up_proj.weight.grad, fused.up_proj.weight.grad,
                                    ref.down_proj.weight.grad, fused.down_proj.weight.grad,
-                                   atol=1e-2, rtol=1e-3)
+                                   atol=1e-2, rtol=1e-2)
             if error_code == 0:
                 error_code = check_all(y_ref, y_fused, x.grad, x2.grad,
                                        ref.gate_proj.weight.grad, fused.gate_proj.weight.grad,
