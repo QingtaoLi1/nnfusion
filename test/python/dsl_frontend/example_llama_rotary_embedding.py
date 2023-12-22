@@ -153,14 +153,14 @@ if __name__ == '__main__':
     torch.set_default_dtype(torch.float16)
 
     arches = ["V100"]
+    max_seq_lens = 1024
+    seq_lens = [64, 128, 256, 512, 1024]
+    q_kv_hidden_sizes = [(4096, 4096), (8192, 1024)]
+    head_dim = 128
     for arch in arches:
         os.environ["WELDER_ARCH"] = arch
         print (f"============= {arch} ================")
         
-        max_seq_lens = 1024
-        seq_lens = [64, 128, 256, 512, 1024]
-        q_kv_hidden_sizes = [(4096, 4096), (8192, 1024)]
-        head_dim = 128
         for seq_len in seq_lens:
             for (q_hidden_size, kv_hidden_size) in q_kv_hidden_sizes:
                 q_num_head = q_hidden_size // head_dim

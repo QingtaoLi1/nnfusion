@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import os
-from custom_op import CustomOp
+from .custom_op import CustomOp
 
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
