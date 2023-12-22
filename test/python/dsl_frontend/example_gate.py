@@ -62,7 +62,7 @@ output0[S, D] +=! m3[S, INTER] * input0[D, INTER];
 ''', input_orders={'input0': down_weight, 'input1': y0, 'input2': y1}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
 # ''', input_orders={'input0':x, 'input1':gate_weight, 'input2':up_weight, 'input3':down_weight}, device=device, arch=welder_arch)
         y = fused_op([down_weight, y0, y1])
-        ctx.save_for_backward(x, gate_weight, up_weight, down_weight)
+        ctx.save_for_backward(x, gate_weight, up_weight, down_weight, y0, y1)
         # ctx.p = p
         return y
         '''
@@ -118,96 +118,63 @@ output0[S, D] +=! m3[S, INTER] * input0[D, INTER];
     @staticmethod
     def backward(ctx, dy):
         welder_arch = os.environ["WELDER_ARCH"] if "WELDER_ARCH" in os.environ else "A100"
-        x, gate_weight, up_weight, down_weight = ctx.saved_tensors
+        x, gate_weight, up_weight, down_weight, _gx, _ux = ctx.saved_tensors
         # print("dy_shape:", dy.shape)                # [S, D]
         # print("x_shape:", x.shape)                  # [S, D]
         # print("down_shape:", down_weight.shape)     # [D, INTER]
         # print("up_shape:", up_weight.shape)         # [INTER, D]
         # print("gate_shape:", gate_weight.shape)     # [INTER, D]
 
-        dx_op_ux = CustomOp(ir=f'''
-m0[S, INTER] +=! input0[S, D] * input1[INTER, D];
-''', input_orders={'input0': x, 'input1': up_weight}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
-        _ux = dx_op_ux([x, up_weight])
-        
-        dx_op_1 = CustomOp(ir=f'''
+        dsilugu_op = CustomOp(ir=f'''
 m1[S, INTER] +=! input0[S, D] * input1[D, INTER];
 ''', input_orders={'input0': dy, 'input1': down_weight}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
-        dy_dwT = dx_op_1([dy,down_weight])
-
-        dx_op_gx = CustomOp(ir=f'''
-m3[S, INTER] +=! input0[S, D] * input1[INTER, D];
-''', input_orders={'input0': x, 'input1': gate_weight}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
-        _gx = dx_op_gx([x, gate_weight])
+        dsilugu = dsilugu_op([dy, down_weight])
 
         grad_silu_op =  CustomOp(ir=f'''
-m4[S, INTER] = const(1.0).cast(`float16`) / (const(1.0).cast(`float16`) + (-input0[S, INTER]).call(`exp`));
+m1[S, INTER] = input0[S, INTER].cast(`float32`);
+m4[S, INTER] = const(1.0).cast(`float16`) / (const(1.0).cast(`float16`) + (-m1[S, INTER]).call(`exp`).cast(`float16`));
 m5[S, INTER] = m4[S, INTER] + input0[S, INTER] * m4[S, INTER] * (const(1.0).cast(`float16`) - m4[S, INTER]);
-''', input_orders={'input0': _gx}, device=device, arch=welder_arch)
-        grad_silu_gx = grad_silu_op([_gx])
+m2[S, INTER] = input1[S, INTER] * input2[S, INTER] * m5[S, INTER];
+''', input_orders={'input0': _gx, 'input1': _ux, 'input2': dsilugu}, device=device, arch=welder_arch)
+        grad_silu_gx = grad_silu_op([_gx, _ux, dsilugu])
 
         dx_left_op = CustomOp(ir=f'''
-m2[S, INTER] = input0[S, INTER] * input1[S, INTER] * input2[S, INTER];
-m7[S, D] +=! m2[S, INTER] * input3[INTER, D];
-''', input_orders={'input0': _ux, 'input1': dy_dwT, 'input2': grad_silu_gx, 'input3': gate_weight}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
-        dx_left = dx_left_op([_ux, dy_dwT, grad_silu_gx, gate_weight])
+m7[S, D] +=! input0[S, INTER] * input1[INTER, D];
+''', input_orders={'input0': grad_silu_gx, 'input1': gate_weight}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
+        dx_left = dx_left_op([grad_silu_gx, gate_weight])
  
         silu_gate_op = CustomOp(ir=f'''
-m8[S, INTER] +=! input0[S, D] * input1[INTER, D];
-m9[S, INTER] = m8[S, INTER] / (const(1.0).cast(`float16`) + (-m8[S, INTER]).call(`exp`));
-''', input_orders={'input0': x, 'input1': gate_weight}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
-        silu_gate = silu_gate_op([x, gate_weight])
+m81[S, INTER] = input0[S, INTER].cast(`float32`);
+m9[S, INTER] = input0[S, INTER] / (const(1.0).cast(`float16`) + (-m81[S, INTER]).call(`exp`).cast(`float16`));
+''', input_orders={'input0': _gx}, device=device, arch=welder_arch)
+        silu = silu_gate_op([_gx])
  
         dx_op = CustomOp(ir=f'''
 m10[S, INTER] = input0[S, INTER] * input1[S, INTER];
 m11[S, D] +=! m10[S, INTER] * input2[INTER, D];
 output0[S, D] = input3[S, D] + m11[S, D];
-''', input_orders={'input0': dy_dwT, 'input1': silu_gate, 'input2': up_weight, 'input3': dx_left}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
-        dx = dx_op([dy_dwT, silu_gate, up_weight, dx_left])
+''', input_orders={'input0': dsilugu, 'input1': silu, 'input2': up_weight, 'input3': dx_left}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
+        dx = dx_op([dsilugu, silu, up_weight, dx_left])
  
         dgw_op = CustomOp(ir=f'''
-m6[S, INTER] = input0[S, INTER] * input1[S, INTER] * input2[S, INTER];
-m7[INTER, D] +=! m6[S, INTER] * input3[S, D];
-''', input_orders={'input0': _ux, 'input1': dy_dwT, 'input2': grad_silu_gx, 'input3': x}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
-        dgw = dgw_op([_ux, dy_dwT, grad_silu_gx, x])
+m7[INTER, D] +=! input0[S, INTER] * input1[S, D];
+''', input_orders={'input0': grad_silu_gx, 'input1': x}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
+        dgw = dgw_op([grad_silu_gx, x])
  
         duw_op = CustomOp(ir=f'''
 m2[S, INTER] = input0[S, INTER] * input1[S, INTER];
 m0[INTER, D] +=! m2[S, INTER] * input2[S, D];
-''', input_orders={'input0': dy_dwT, 'input1': silu_gate, 'input2': x}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
-        duw = duw_op([dy_dwT, silu_gate, x])
+''', input_orders={'input0': dsilugu, 'input1': silu, 'input2': x}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
+        duw = duw_op([dsilugu, silu, x])
  
         ddw_op_2 = CustomOp(ir=f'''
 m0[S, INTER] = input0[S, INTER] * input1[S, INTER];
 m7[D, INTER] +=! input2[S, D] * m0[S, INTER];
-''', input_orders={'input0': silu_gate, 'input1': _ux, 'input2': dy}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
-        ddw = ddw_op_2([silu_gate, _ux, dy])
+''', input_orders={'input0': silu, 'input1': _ux, 'input2': dy}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
+        ddw = ddw_op_2([silu, _ux, dy])
  
         return dx, dgw, duw, ddw
  
- 
-#         x, weight, mask = ctx.saved_tensors
-#         p = ctx.p
-#         dbias = torch.sum(dy, dim=0)
-#         dw_op = CustomOp(ir=f'''
-# m0[N0, N1] = input0[N0, N1].cast(`float32`);
-# m1[N0, N1] = m0[N0, N1] * const(0.5).cast(`float32`) * (const(1.0).cast(`float32`) + (m0[N0, N1] * const({M_SQRT1_2}).cast(`float32`)).call(`erf`));
-# m2[N0, N1] = m1[N0, N1].cast(`float16`);
-# m3[N0, N1] = m2[N0, N1] * input2[N0, N1] / const({1-p}).cast(`float16`);
-# output0[N2, N1] +=! input1[N0, N2] * m3[N0, N1];
-# ''', input_orders={'input0': x, 'input1': dy, 'input2': mask}, tags="tensorCoreConfig=(0, 1)", device=device)
-#         dw = dw_op([x, dy, mask])
- 
-#         dx_op = CustomOp(ir=f'''
-# m0[N0, N1] +=! input3[N0, N2] * input1[N2, N1];
-# m1[N0, N1] = m0[N0, N1] * input2[N0, N1] * const({1-p}).cast(`float16`);
-# m2[N0, N1] = m1[N0, N1].cast(`float32`);
-# m3[N0, N1] = const(0.5).cast(`float32`) * (const(1.0).cast(`float32`) + (input0[N0, N1] * const({M_SQRT1_2}).cast(`float32`)).call(`erf`));
-# m4[N0, N1] = (const(-0.5).cast(`float32`) * input0[N0, N1] * input0[N0, N1]).call(`exp`) * const({M_2_SQRTPI * M_SQRT1_2 * 0.5}).cast(`float32`);
-# output0[N0, N1] = m2[N0, N1] * (m3[N0, N1] + input0[N0, N1] * m4[N0, N1]);
-# ''', input_orders={'input0': x, 'input1': weight, 'input2': mask, 'input3': dy}, tags="tensorCoreConfig=(0, 1)", device=device)
-#         dx = dx_op([x, weight, mask, dy])
-        return None, None, None, None
  
 class FusedCustomMLP(nn.Module):
     def __init__(
