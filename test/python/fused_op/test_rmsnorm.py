@@ -73,7 +73,7 @@ if __name__ == '__main__':
     torch.set_default_dtype(torch.float16)
 
     # Experiment setup
-    seq_lens = [1024]
+    seq_lens = [64, 128, 256, 512, 1024]
     hidden_sizes = [4096, 8192]
     use_module = True
 
