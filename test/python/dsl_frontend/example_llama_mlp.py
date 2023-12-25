@@ -31,19 +31,11 @@ class LlamaMLP(nn.Module):
  
         return down_proj
  
-class FusedMLPFunc(torch.autograd.Function):
+class FusedLlamaMLPFunc(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, gate_weight, up_weight, down_weight):
         welder_arch = os.environ["WELDER_ARCH"] if "WELDER_ARCH" in os.environ else "A100"
-#         fused_op = CustomOp(ir=f'''
-# m0[N0, N2] +=! input0[N0, N1] * input1[N2, N1];
-# m1[N0, N2] +=! input0[N0, N1] * input2[N2, N1];
-# m2[N0, N2] = m0[N0, N2] / (1.0 + (-m0[N0, N2]).call(`exp`));
-# m3[N0, N2] = m2[N0, N2] * m1[N0, N2];
-# output0[N0, N3] +=! m3[N0, N2] * input3[N3, N2];
-# ''', input_orders={'input0':x, 'input1':gate_weight, 'input2':up_weight, 'input3':down_weight}, tags="tensorCoreConfig=(0, 1)", device=device)
-# # ''', input_orders={'input0':x, 'input1':gate_weight, 'input2':up_weight, 'input3':down_weight}, device=device, arch=welder_arch)
-#         y = fused_op([x, gate_weight, up_weight, down_weight])
+
         fused_op_0 = CustomOp(ir=f'''
 m0[S, INTER] +=! input0[S, D] * input1[INTER, D];
 ''', input_orders={'input0': x, 'input1': gate_weight}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
@@ -60,60 +52,9 @@ m2[S, INTER] = input1[S, INTER] / (const(1.0).cast(`float16`) + (-m11[S, INTER])
 m3[S, INTER] = m2[S, INTER] * input2[S, INTER];
 output0[S, D] +=! m3[S, INTER] * input0[D, INTER];
 ''', input_orders={'input0': down_weight, 'input1': y0, 'input2': y1}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
-# ''', input_orders={'input0':x, 'input1':gate_weight, 'input2':up_weight, 'input3':down_weight}, device=device, arch=welder_arch)
         y = fused_op([down_weight, y0, y1])
         ctx.save_for_backward(x, gate_weight, up_weight, down_weight, y0, y1)
-        # ctx.p = p
         return y
-        '''
-m11[S, INTER] = input1[S, INTER].cast(`float32`);
-m2[S, INTER] = m11[S, INTER] / (const(1.0).cast(`float32`) + (-m11[S, INTER]).call(`exp`));
-m3[S, INTER] = m2[S, INTER].cast(`float16`) * input2[S, INTER];
-output0[S, D] +=! m3[S, INTER] * input0[D, INTER];
-        '''
-# class FusedMLPFunc(torch.autograd.Function):
-#     @staticmethod
-#     def forward(ctx, x, gate_weight, up_weight, down_weight):
-#         print("down_weight:", down_weight)
-# #         fused_op = CustomOp(ir=f'''
-# # m0[N0, N2] +=! input0[N0, N1] * input1[N2, N1];
-# # m1[N0, N2] +=! input0[N0, N1] * input2[N2, N1];
-# # m2[N0, N2] = m0[N0, N2] / (1.0 + (-m0[N0, N2]).call(`exp`));
-# # m3[N0, N2] = m2[N0, N2] * m1[N0, N2];
-# # output0[N0, N3] +=! m3[N0, N2] * input3[N3, N2];
-# # ''', input_orders={'input0':x, 'input1':gate_weight, 'input2':up_weight, 'input3':down_weight}, tags="tensorCoreConfig=(0, 1)", device=device)
-# # # ''', input_orders={'input0':x, 'input1':gate_weight, 'input2':up_weight, 'input3':down_weight}, device=device)
-# #         y = fused_op([x, gate_weight, up_weight, down_weight])
-#         fused_op_0 = CustomOp(ir=f'''
-# m1[N0, N1] = input0[N0, N1].cast(`float32`);
-# m2[N2, N1] = input1[N2, N1].cast(`float32`);
-# m0[N0, N2] +=! m1[N0, N1] * m2[N2, N1];
-# output0[N0, N2] = m0[N0, N2].cast(`float16`)
-# ''', input_orders={'input0':x, 'input1':gate_weight}, tags="tensorCoreConfig=(0, 1)", device=device)
-#         y0 = fused_op_0([x, gate_weight])
-#         print("y0:", y0)
-#         fused_op_1 = CustomOp(ir=f'''
-# m1[N0, N1] = input0[N0, N1].cast(`float32`);
-# m2[N2, N1] = input1[N2, N1].cast(`float32`);
-# m0[N0, N2] +=! m1[N0, N1] * m2[N2, N1];
-# output0[N0, N2] = m0[N0, N2].cast(`float16`)
-# ''', input_orders={'input0':x, 'input1':up_weight}, tags="tensorCoreConfig=(0, 1)", device=device)
-#         y1 = fused_op_1([x, up_weight])
-#         print("y1:", y1)
-#         fused_op = CustomOp(ir=f'''
-# m2[N0, N2] = input1[N0, N2] / (const(1.0).cast(`float16`) + (-input1[N0, N2]).call(`exp`));
-# m3[N0, N2] = m2[N0, N2] * input2[N0, N2];
-# output0[N0, N3] +=! m3[N0, N2] * input0[N3, N2];
-# ''', input_orders={'input0':down_weight, 'input1':y0, 'input2':y1},device=device)
-# # ''', input_orders={'input0':x, 'input1':gate_weight, 'input2':up_weight, 'input3':down_weight}, device=device)
-# # i0[N3, N2] = input0[N3, N2].cast(`float32`);
-# # m22[N0, N2] = m2[N0, N2].cast(`float32`);
-# # i2[N0, N2] = input2[N0, N2].cast(`float32`);
-#         y = fused_op([down_weight,y0,y1])
-#         print("y:", y)
-#         ctx.save_for_backward(x, gate_weight, up_weight, down_weight)
-#         # ctx.p = p
-#         return y
  
     @staticmethod
     def backward(ctx, dy):
@@ -176,7 +117,7 @@ m7[D, INTER] +=! input2[S, D] * m0[S, INTER];
         return dx, dgw, duw, ddw
  
  
-class FusedCustomMLP(nn.Module):
+class FusedLlamaMLP(nn.Module):
     def __init__(
         self,
         hidden_size,
@@ -193,8 +134,7 @@ class FusedCustomMLP(nn.Module):
         self.fc2.reset_parameters()
  
     def forward(self, x):
-        return FusedMLPFunc.apply(x, self.gate_proj.weight, self.up_proj.weight, self.down_proj.weight)
-        # return FusedLinearFunc.apply(x,  torch.eye(self.fc2.weight.shape[0], self.fc2.weight.shape[1]), torch.zeros_like(self.fc2.bias), self.activation_dropout)
+        return FusedLlamaMLPFunc.apply(x, self.gate_proj.weight, self.up_proj.weight, self.down_proj.weight)
    
     def get_fc2(self):
         return self.fc2
@@ -202,7 +142,7 @@ class FusedCustomMLP(nn.Module):
 if __name__ == '__main__':
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     torch.set_default_dtype(torch.float16)
-    os.environ["WELDER_ARCH"] = "A100"
+    os.environ["WELDER_ARCH"] = "A6000"
 
     seq_lens = [64, 128, 256, 512, 1024]
     hidden_sizes = [4096, 8192]
@@ -211,7 +151,7 @@ if __name__ == '__main__':
         for hidden_size, intermediate_size in zip(hidden_sizes, intermediate_sizes):
             x = torch.randn(seq_len, hidden_size, requires_grad = True, device=device)
             x2 = x.detach().clone().requires_grad_()
-            fused = FusedCustomMLP(hidden_size, intermediate_size).to(device)
+            fused = FusedLlamaMLP(hidden_size, intermediate_size).to(device)
             ref = LlamaMLP(hidden_size, intermediate_size, getattr(fused, 'gate_proj'), getattr(fused, 'up_proj'), getattr(fused, 'down_proj'))
         
             y_ref = ref(x)
