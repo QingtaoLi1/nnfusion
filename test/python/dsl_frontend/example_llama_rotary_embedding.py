@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import os
-from custom_op import CustomOp
+from custom_op import CustomOp, KERNEL_CACHE
 from test_utils import test_forward_time, test_backward_time
 
 
@@ -152,7 +152,7 @@ if __name__ == '__main__':
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     torch.set_default_dtype(torch.float16)
 
-    arches = ["V100"]
+    arches = ["A100", 'V100', 'A6000']
     max_seq_lens = 1024
     seq_lens = [64, 128, 256, 512, 1024]
     q_kv_hidden_sizes = [(4096, 4096), (8192, 1024)]
@@ -252,5 +252,10 @@ if __name__ == '__main__':
                 del ref, fused, q, k, v, q2, k2, v2, q_embed_ref, k_embed_ref, q_embed_fused, k_embed_fused, loss_ref, loss_fused
                 torch.cuda.empty_cache()
         
-        os.system(f"mv ~/.kernel/*.json ~/.kernel/{arch}/rope/")
+        from pathlib import Path
+        home_path = os.environ["HOME"]
+        Path(f"{home_path}/.kernel/{arch}/rope/").mkdir(parents=True, exist_ok=True)
+        exit_code = os.system(f"mv {home_path}/.kernel/*.json {home_path}/.kernel/{arch}/rope/")
+        print (f"(mv JSON) exit_code: {exit_code}")
+        KERNEL_CACHE.clear()
 

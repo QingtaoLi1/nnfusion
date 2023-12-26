@@ -4,7 +4,7 @@ import torch.utils.checkpoint
 from torch import nn
 import os
 
-from custom_op import CustomOp
+from custom_op import CustomOp, KERNEL_CACHE
 from test_utils import test_forward_time, test_backward_time
 
 
@@ -142,83 +142,96 @@ class FusedLlamaMLP(nn.Module):
 if __name__ == '__main__':
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     torch.set_default_dtype(torch.float16)
-    os.environ["WELDER_ARCH"] = "A6000"
 
+    arches = ["A100", 'A6000', 'V100']
     seq_lens = [64, 128, 256, 512, 1024]
     hidden_sizes = [4096, 8192]
     intermediate_sizes = [11008, 28672]
-    for seq_len in seq_lens:
-        for hidden_size, intermediate_size in zip(hidden_sizes, intermediate_sizes):
-            x = torch.randn(seq_len, hidden_size, requires_grad = True, device=device)
-            x2 = x.detach().clone().requires_grad_()
-            fused = FusedLlamaMLP(hidden_size, intermediate_size).to(device)
-            ref = LlamaMLP(hidden_size, intermediate_size, getattr(fused, 'gate_proj'), getattr(fused, 'up_proj'), getattr(fused, 'down_proj'))
-        
-            y_ref = ref(x)
-            loss_ref = y_ref.sum()
-            loss_ref.backward()
-        
-            y_fused = fused(x2)
-            loss_fused = y_fused.sum()
-            loss_fused.backward()
-        
-            # Check validity
-            print (f"------ Vadility Check ({seq_len}, {hidden_size}, {intermediate_size}) ------")
-            # print (f"y_ref      : {y_ref[0][:10]}")
-            # print (f"y_fused    : {y_fused[0][:10]}")
-            # print (f"x_ref_grad : {x.grad[0][:10]}")
-            # print (f"x_fused_grad: {x2.grad[0][:10]}")
-            # print (f"gate_ref_grad : {ref.gate_proj.weight.grad[:10]}")
-            # print (f"w_ref_shape : {ref.gate_proj.weight.shape}")
-            # print (f"w_ref_grad_shape : {ref.gate_proj.weight.grad.shape}")
-            # print (f"gate_fused_grad: {fused.gate_proj.weight.grad[:10]}")
-            # print (f"w_fused_shape: {fused.down_proj.weight.shape}")
-            # y_grad = torch.ones_like(y_fused, device=device)
-            # y_fused.backward(y_grad)
 
-            def check_all(y_ref, y_fused, x_ref_grad, x_fused_grad,
-                          gate_ref_grad, gate_fused_grad, up_ref_grad, up_fused_grad, down_ref_grad, down_fused_grad,
-                          atol, rtol):
-                error_code = 0
-                if (not torch.allclose(y_ref, y_fused, atol=atol, rtol=rtol)):
-                    error_code += 1
-                    print (f"atol={atol}, rtol={rtol}: Forward y failed.")
-                if (not torch.allclose(x_ref_grad, x_fused_grad, atol=atol, rtol=rtol)):
-                    error_code += 2
-                    print (f"atol={atol}, rtol={rtol}: Backward dx check failed.")
-                if (not torch.allclose(gate_ref_grad, gate_fused_grad, atol=atol, rtol=rtol)):
-                    error_code += 4
-                    print (f"atol={atol}, rtol={rtol}: Backward dgate check failed.")
-                if (not torch.allclose(up_ref_grad, up_fused_grad, atol=atol, rtol=rtol)):
-                    error_code += 8
-                    print (f"atol={atol}, rtol={rtol}: Backward dup check failed.")
-                if (not torch.allclose(down_ref_grad, down_fused_grad, atol=atol, rtol=rtol)):
-                    error_code += 16
-                    print (f"atol={atol}, rtol={rtol}: Backward ddown check failed.")
-                if (error_code == 0):
-                    print (f"atol={atol}, rtol={rtol}: Passed.")
-                return error_code
+    for arch in arches:
+        os.environ["WELDER_ARCH"] = arch
+        print (f"============= {arch} ================")
+        
+        for seq_len in seq_lens:
+            for hidden_size, intermediate_size in zip(hidden_sizes, intermediate_sizes):
+                x = torch.randn(seq_len, hidden_size, requires_grad = True, device=device)
+                x2 = x.detach().clone().requires_grad_()
+                fused = FusedLlamaMLP(hidden_size, intermediate_size).to(device)
+                ref = LlamaMLP(hidden_size, intermediate_size, getattr(fused, 'gate_proj'), getattr(fused, 'up_proj'), getattr(fused, 'down_proj'))
+            
+                y_ref = ref(x)
+                loss_ref = y_ref.sum()
+                loss_ref.backward()
+            
+                y_fused = fused(x2)
+                loss_fused = y_fused.sum()
+                loss_fused.backward()
+            
+                # Check validity
+                print (f"------ Vadility Check ({seq_len}, {hidden_size}, {intermediate_size}) ------")
+                # print (f"y_ref      : {y_ref[0][:10]}")
+                # print (f"y_fused    : {y_fused[0][:10]}")
+                # print (f"x_ref_grad : {x.grad[0][:10]}")
+                # print (f"x_fused_grad: {x2.grad[0][:10]}")
+                # print (f"gate_ref_grad : {ref.gate_proj.weight.grad[:10]}")
+                # print (f"w_ref_shape : {ref.gate_proj.weight.shape}")
+                # print (f"w_ref_grad_shape : {ref.gate_proj.weight.grad.shape}")
+                # print (f"gate_fused_grad: {fused.gate_proj.weight.grad[:10]}")
+                # print (f"w_fused_shape: {fused.down_proj.weight.shape}")
+                # y_grad = torch.ones_like(y_fused, device=device)
+                # y_fused.backward(y_grad)
 
-            error_code = check_all(y_ref, y_fused, x.grad, x2.grad,
-                                   ref.gate_proj.weight.grad, fused.gate_proj.weight.grad,
-                                   ref.up_proj.weight.grad, fused.up_proj.weight.grad,
-                                   ref.down_proj.weight.grad, fused.down_proj.weight.grad,
-                                   atol=1e-2, rtol=1e-2)
-            if error_code == 0:
+                def check_all(y_ref, y_fused, x_ref_grad, x_fused_grad,
+                            gate_ref_grad, gate_fused_grad, up_ref_grad, up_fused_grad, down_ref_grad, down_fused_grad,
+                            atol, rtol):
+                    error_code = 0
+                    if (not torch.allclose(y_ref, y_fused, atol=atol, rtol=rtol)):
+                        error_code += 1
+                        print (f"atol={atol}, rtol={rtol}: Forward y failed.")
+                    if (not torch.allclose(x_ref_grad, x_fused_grad, atol=atol, rtol=rtol)):
+                        error_code += 2
+                        print (f"atol={atol}, rtol={rtol}: Backward dx check failed.")
+                    if (not torch.allclose(gate_ref_grad, gate_fused_grad, atol=atol, rtol=rtol)):
+                        error_code += 4
+                        print (f"atol={atol}, rtol={rtol}: Backward dgate check failed.")
+                    if (not torch.allclose(up_ref_grad, up_fused_grad, atol=atol, rtol=rtol)):
+                        error_code += 8
+                        print (f"atol={atol}, rtol={rtol}: Backward dup check failed.")
+                    if (not torch.allclose(down_ref_grad, down_fused_grad, atol=atol, rtol=rtol)):
+                        error_code += 16
+                        print (f"atol={atol}, rtol={rtol}: Backward ddown check failed.")
+                    if (error_code == 0):
+                        print (f"atol={atol}, rtol={rtol}: Passed.")
+                    return error_code
+
                 error_code = check_all(y_ref, y_fused, x.grad, x2.grad,
-                                       ref.gate_proj.weight.grad, fused.gate_proj.weight.grad,
-                                       ref.up_proj.weight.grad, fused.up_proj.weight.grad,
-                                       ref.down_proj.weight.grad, fused.down_proj.weight.grad,
-                                       atol=1e-3, rtol=1e-3)
+                                    ref.gate_proj.weight.grad, fused.gate_proj.weight.grad,
+                                    ref.up_proj.weight.grad, fused.up_proj.weight.grad,
+                                    ref.down_proj.weight.grad, fused.down_proj.weight.grad,
+                                    atol=1e-2, rtol=1e-2)
+                if error_code == 0:
+                    error_code = check_all(y_ref, y_fused, x.grad, x2.grad,
+                                        ref.gate_proj.weight.grad, fused.gate_proj.weight.grad,
+                                        ref.up_proj.weight.grad, fused.up_proj.weight.grad,
+                                        ref.down_proj.weight.grad, fused.down_proj.weight.grad,
+                                        atol=1e-3, rtol=1e-3)
 
-            # Check efficiency
-            print ("------ Efficiency Check ------")
-            repeat = 1000
-            test_forward_time(repeat, ref, x)
-            test_forward_time(repeat, fused, x2)
-            test_backward_time(repeat, ref, x)
-            test_backward_time(repeat, fused, x2)
-            print ()
+                # Check efficiency
+                print ("------ Efficiency Check ------")
+                repeat = 1000
+                test_forward_time(repeat, ref, x)
+                test_forward_time(repeat, fused, x2)
+                test_backward_time(repeat, ref, x)
+                test_backward_time(repeat, fused, x2)
+                print ()
 
-            del x, x2, ref, fused, y_ref, y_fused, loss_ref, loss_fused
-            torch.cuda.empty_cache()
+                del x, x2, ref, fused, y_ref, y_fused, loss_ref, loss_fused
+                torch.cuda.empty_cache()
+
+        from pathlib import Path
+        home_path = os.environ["HOME"]
+        Path(f"{home_path}/.kernel/{arch}/mlp/").mkdir(parents=True, exist_ok=True)
+        exit_code = os.system(f"mv {home_path}/.kernel/*.json {home_path}/.kernel/{arch}/mlp/")
+        print (f"(mv JSON) exit_code: {exit_code}")
+        KERNEL_CACHE.clear()
+

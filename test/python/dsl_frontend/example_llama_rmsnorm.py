@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import os
-from custom_op import CustomOp
+from custom_op import CustomOp, KERNEL_CACHE
 from test_utils import test_forward_time, test_backward_time
 
 
@@ -88,78 +88,90 @@ class FusedLlamaRMSNorm(nn.Module):
 
 if __name__ == '__main__':
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    os.environ["WELDER_ARCH"] = "A100"
     torch.set_default_dtype(torch.float16)
 
+    arches = ['A100', 'V100', 'A6000']
     seq_lens = [64, 128, 256, 512, 1024]
     hidden_sizes = [4096, 8192]
 
-    for max_seq_len in seq_lens:
-        for hidden_size in hidden_sizes:
-            # Experiment setup
-            x = torch.randn(max_seq_len, hidden_size, requires_grad=True, device=device)
-            x2 = x.detach().clone().requires_grad_()
-            ref = LlamaRMSNorm(hidden_size).to(device)
-            fused = FusedLlamaRMSNorm(hidden_size).to(device)
-            
-            # Run forward and backward
-            y_ref = ref(x)
-            loss_ref = y_ref.sum()
-            loss_ref.backward()
+    for arch in arches:
+        os.environ["WELDER_ARCH"] = arch
+        print (f"============= {arch} ================")
+        
+        for max_seq_len in seq_lens:
+            for hidden_size in hidden_sizes:
+                # Experiment setup
+                x = torch.randn(max_seq_len, hidden_size, requires_grad=True, device=device)
+                x2 = x.detach().clone().requires_grad_()
+                ref = LlamaRMSNorm(hidden_size).to(device)
+                fused = FusedLlamaRMSNorm(hidden_size).to(device)
+                
+                # Run forward and backward
+                y_ref = ref(x)
+                loss_ref = y_ref.sum()
+                loss_ref.backward()
 
-            y_fused = fused(x2)
-            loss_fused = y_fused.sum()
-            loss_fused.backward()
+                y_fused = fused(x2)
+                loss_fused = y_fused.sum()
+                loss_fused.backward()
 
-            # Check validity
-            print (f"------ Vadility Check : ({max_seq_len}, {hidden_size}) ------")
-            # print (f"y_ref      : {y_ref[0][:10]}, {y_ref.dtype}")
-            # print (f"y_fused    : {y_fused[0][:10]}, {y_fused.dtype}")
-            # print (f"x_ref_grad : {x.grad[0][:10]}, {x.grad.dtype}")
-            # print (f"x_fused_grad: {x2.grad[0][:10]}, {x2.grad.dtype}")
-            # print (f"w_ref_grad : {ref.weight.grad[:10]}, {ref.weight.grad.dtype}")
-            # print (f"w_fused_grad: {fused.weight.grad[:10]}, {fused.weight.grad.dtype}")
-            
-            # xshape = x.grad.shape
-            # for i in range(xshape[0]):
-            #     if not torch.allclose(x.grad[i], x2.grad[i], atol=1e-2, rtol=1e-2):
-            #         for j in range(xshape[1]):
-            #             if abs(x.grad[i][j] - x2.grad[i][j]) > 1e-2:
-            #                 print (f"Error at ({i}, {j}): {x.grad[i][j]} != {x2.grad[i][j]}")
-            #                 break
-            #         break
-            # for i in range(ref.weight.shape[0]):
-            #     if not torch.allclose(ref.weight.grad[i], fused.weight.grad[i], atol=1e-2, rtol=1e-2):
-            #         print (f"Error at ({i}): {ref.weight.grad[i]} != {fused.weight.grad[i]}")
-            #         break
+                # Check validity
+                print (f"------ Vadility Check : ({max_seq_len}, {hidden_size}) ------")
+                # print (f"y_ref      : {y_ref[0][:10]}, {y_ref.dtype}")
+                # print (f"y_fused    : {y_fused[0][:10]}, {y_fused.dtype}")
+                # print (f"x_ref_grad : {x.grad[0][:10]}, {x.grad.dtype}")
+                # print (f"x_fused_grad: {x2.grad[0][:10]}, {x2.grad.dtype}")
+                # print (f"w_ref_grad : {ref.weight.grad[:10]}, {ref.weight.grad.dtype}")
+                # print (f"w_fused_grad: {fused.weight.grad[:10]}, {fused.weight.grad.dtype}")
+                
+                # xshape = x.grad.shape
+                # for i in range(xshape[0]):
+                #     if not torch.allclose(x.grad[i], x2.grad[i], atol=1e-2, rtol=1e-2):
+                #         for j in range(xshape[1]):
+                #             if abs(x.grad[i][j] - x2.grad[i][j]) > 1e-2:
+                #                 print (f"Error at ({i}, {j}): {x.grad[i][j]} != {x2.grad[i][j]}")
+                #                 break
+                #         break
+                # for i in range(ref.weight.shape[0]):
+                #     if not torch.allclose(ref.weight.grad[i], fused.weight.grad[i], atol=1e-2, rtol=1e-2):
+                #         print (f"Error at ({i}): {ref.weight.grad[i]} != {fused.weight.grad[i]}")
+                #         break
 
-            def check_all(y_ref, y_fused, x_ref_grad, x_fused_grad, w_ref_grad, w_fused_grad, atol, rtol):
-                error_code = 0
-                if (not torch.allclose(y_ref, y_fused, atol=atol, rtol=rtol)):
-                    error_code += 1
-                    print (f"atol={atol}, rtol={rtol}: Forward check failed.")
-                if (not torch.allclose(w_ref_grad, w_fused_grad, atol=atol, rtol=rtol)):
-                    error_code += 2
-                    print (f"atol={atol}, rtol={rtol}: Backward dw check failed.")
-                if (not torch.allclose(x_ref_grad, x_fused_grad, atol=atol, rtol=rtol)):
-                    error_code += 4
-                    print (f"atol={atol}, rtol={rtol}: Backward dx check failed.")
-                if (error_code == 0):
-                    print (f"atol={atol}, rtol={rtol}: Passed.")
-                return error_code
-            
-            error_code = check_all(y_ref, y_fused, x.grad, x2.grad, ref.weight.grad, fused.weight.grad, atol=1e-2, rtol=1e-2)
-            if error_code == 0:
-                error_code = check_all(y_ref, y_fused, x.grad, x2.grad, ref.weight.grad, fused.weight.grad, atol=1e-2, rtol=1e-3)                
+                def check_all(y_ref, y_fused, x_ref_grad, x_fused_grad, w_ref_grad, w_fused_grad, atol, rtol):
+                    error_code = 0
+                    if (not torch.allclose(y_ref, y_fused, atol=atol, rtol=rtol)):
+                        error_code += 1
+                        print (f"atol={atol}, rtol={rtol}: Forward check failed.")
+                    if (not torch.allclose(w_ref_grad, w_fused_grad, atol=atol, rtol=rtol)):
+                        error_code += 2
+                        print (f"atol={atol}, rtol={rtol}: Backward dw check failed.")
+                    if (not torch.allclose(x_ref_grad, x_fused_grad, atol=atol, rtol=rtol)):
+                        error_code += 4
+                        print (f"atol={atol}, rtol={rtol}: Backward dx check failed.")
+                    if (error_code == 0):
+                        print (f"atol={atol}, rtol={rtol}: Passed.")
+                    return error_code
+                
+                error_code = check_all(y_ref, y_fused, x.grad, x2.grad, ref.weight.grad, fused.weight.grad, atol=1e-2, rtol=1e-2)
+                if error_code == 0:
+                    error_code = check_all(y_ref, y_fused, x.grad, x2.grad, ref.weight.grad, fused.weight.grad, atol=1e-2, rtol=1e-3)                
 
-            # Check efficiency
-            print ("------ Efficiency Check ------")
-            repeat = 1000
-            test_forward_time(repeat, ref, x)
-            test_forward_time(repeat, fused, x2)
-            test_backward_time(repeat, ref, x)
-            test_backward_time(repeat, fused, x2)
-            print ()
+                # Check efficiency
+                print ("------ Efficiency Check ------")
+                repeat = 1000
+                test_forward_time(repeat, ref, x)
+                test_forward_time(repeat, fused, x2)
+                test_backward_time(repeat, ref, x)
+                test_backward_time(repeat, fused, x2)
+                print ()
 
-            del x, x2, ref, fused, y_ref, y_fused, loss_ref, loss_fused
-            torch.cuda.empty_cache()
+                del x, x2, ref, fused, y_ref, y_fused, loss_ref, loss_fused
+                torch.cuda.empty_cache()
+        
+        from pathlib import Path
+        home_path = os.environ["HOME"]
+        Path(f"{home_path}/.kernel/{arch}/rmsnorm/").mkdir(parents=True, exist_ok=True)
+        exit_code = os.system(f"mv {home_path}/.kernel/*.json {home_path}/.kernel/{arch}/rmsnorm/")
+        print (f"(mv JSON) exit_code: {exit_code}")
+        KERNEL_CACHE.clear()
+
