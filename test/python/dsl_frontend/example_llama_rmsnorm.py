@@ -170,8 +170,10 @@ if __name__ == '__main__':
         
         from pathlib import Path
         home_path = os.environ["HOME"]
-        Path(f"{home_path}/.kernel/{arch}/rmsnorm/").mkdir(parents=True, exist_ok=True)
-        exit_code = os.system(f"mv {home_path}/.kernel/*.json {home_path}/.kernel/{arch}/rmsnorm/")
+        Path(f"{home_path}/.kernel/{arch}/llama_rmsnorm/").mkdir(parents=True, exist_ok=True)
+        open(f"{home_path}/.kernel/{arch}/__init__.py", 'a').close()
+        open(f"{home_path}/.kernel/{arch}/llama_rmsnorm/__init__.py", 'a').close()
+        exit_code = os.system(f"mv {home_path}/.kernel/*.json {home_path}/.kernel/{arch}/llama_rmsnorm/")
         print (f"(mv JSON) exit_code: {exit_code}")
         KERNEL_CACHE.clear()
 

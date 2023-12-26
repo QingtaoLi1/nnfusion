@@ -3,7 +3,7 @@ import setuptools
 
 setuptools.setup(
     name="fused_op",
-    version="0.2.3",
+    version="0.2.4",
     author="Qingtao Li",
     author_email="qingtaoli@microsoft.com",
     description="A test package of fused operations.",
@@ -11,7 +11,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="no url",
     packages=setuptools.find_packages(),
-    package_data={"fused_op": ["kernel/*/*.json"]},
+    package_data={"fused_op": ["kernel/*/*/*.json"]},
     classifiers=[
         "Programming Language :: Python :: 3.9",
         "License :: OSI Approved :: MIT License",

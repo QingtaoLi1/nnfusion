@@ -254,8 +254,10 @@ if __name__ == '__main__':
         
         from pathlib import Path
         home_path = os.environ["HOME"]
-        Path(f"{home_path}/.kernel/{arch}/rope/").mkdir(parents=True, exist_ok=True)
-        exit_code = os.system(f"mv {home_path}/.kernel/*.json {home_path}/.kernel/{arch}/rope/")
+        Path(f"{home_path}/.kernel/{arch}/llama_rope/").mkdir(parents=True, exist_ok=True)
+        open(f"{home_path}/.kernel/{arch}/__init__.py", 'a').close()
+        open(f"{home_path}/.kernel/{arch}/llama_rope/__init__.py", 'a').close()
+        exit_code = os.system(f"mv {home_path}/.kernel/*.json {home_path}/.kernel/{arch}/llama_rope/")
         print (f"(mv JSON) exit_code: {exit_code}")
         KERNEL_CACHE.clear()
 

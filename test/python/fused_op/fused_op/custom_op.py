@@ -39,10 +39,10 @@ def generate_welder_graph(ir, feed_list, extra_outputs, tags=""):
   return json.dumps(nodes, indent=2)
 
 
-def load_kernel(arch, hash_key):
-  with resources.open_text(f"{package_name}.kernel.{arch}", f"{hash_key}.json") as f:
+def load_kernel(arch, op_name, hash_key):
+  with resources.open_text(f"{package_name}.kernel.{arch}.{op_name}", f"{hash_key}.json") as f:
     raw_json_graph = json.load(f)
-  with resources.open_text(f"{package_name}.kernel.{arch}", f"{hash_key}.kernel.json") as f:
+  with resources.open_text(f"{package_name}.kernel.{arch}.{op_name}", f"{hash_key}.kernel.json") as f:
     tuned_json_graph = json.load(f)
   
   inputs_outputs_info = []
@@ -76,7 +76,7 @@ class CustomOp(torch.nn.Module):
   #   self.output_list = inout_info[1]
 
   
-  def __init__(self, ir, input_orders, extra_outputs=[], tags="", steps=1, arch='g3090', device=None):
+  def __init__(self, ir, input_orders, extra_outputs=[], tags="", op_name="default", steps=1, arch='g3090', device=None):
     super(CustomOp, self).__init__()
     if device is None:
       self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -102,7 +102,7 @@ class CustomOp(torch.nn.Module):
       self.output_list = cache.inout_info[1]
       return
       
-    self.custom_lib, self.custom_key, inout_info = load_kernel(arch, self.hash_key)
+    self.custom_lib, self.custom_key, inout_info = load_kernel(arch, op_name, self.hash_key)
     self.output_list = inout_info[1]
     KERNEL_CACHE[self.hash_key] = CompiledKernel(self.custom_lib, self.custom_key, inout_info)
 

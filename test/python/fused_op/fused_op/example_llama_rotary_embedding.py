@@ -5,6 +5,7 @@ from .custom_op import CustomOp
 
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+op_name = "llama_rope"
 
 # class LlamaRotaryEmbedding(nn.Module):
 #     def __init__(self, head_dim, max_position_embeddings=2048, base=10000, device=None):
@@ -65,7 +66,7 @@ m3[S, D] = m2[input1[S], D];
 
 m4[S, H, D] = (-input0[S, H, D + {head_dim // 2}]).when([D < {head_dim // 2}], input0[S, H, D - {head_dim // 2}]) where D in {head_dim};
 output0[S, H, D] = input0[S, H, D] * m1[S, D] + m4[S, H, D] * m3[S, D];
-''', input_orders={'input0': q, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, device=device, arch=welder_arch)
+''', input_orders={'input0': q, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, op_name=op_name, device=device, arch=welder_arch)
         q_embed = fused_q_op([q, position_ids, cos_cached, sin_cached])
 
         fused_k_op = CustomOp(ir=f'''
@@ -76,7 +77,7 @@ m3[S, D] = m2[input1[S], D];
 
 m5[S, H, D] = (-input0[S, H, D + {head_dim // 2}]).when([D < {head_dim // 2}], input0[S, H, D - {head_dim // 2}]) where D in {head_dim};
 output0[S, H, D] = input0[S, H, D] * m1[S, D] + m5[S, H, D] * m3[S, D];
-''', input_orders={'input0': k, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, device=device, arch=welder_arch)
+''', input_orders={'input0': k, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, op_name=op_name, device=device, arch=welder_arch)
         k_embed = fused_k_op([k, position_ids, cos_cached, sin_cached])
 
         ctx.save_for_backward(position_ids, cos_cached, sin_cached)
@@ -101,7 +102,7 @@ di0a[S, H, D] = m10[S, H, D] * m1[S, D];
 dm4[S, H, D] = m10[S, H, D] * m3[S, D];
 di0b[S, H, D] = dm4[S, H, D + {head_dim // 2}].when([D < {head_dim // 2}], (-dm4[S, H, D - {head_dim // 2}])) where D in {head_dim};
 output0[S, H, D] = di0a[S, H, D] + di0b[S, H, D];
-''', input_orders={'input0': dq_embed, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, device=device, arch=welder_arch)
+''', input_orders={'input0': dq_embed, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, op_name=op_name, device=device, arch=welder_arch)
         dq = dq_op([dq_embed, position_ids, cos_cached, sin_cached])
 
         dk_op = CustomOp(ir=f'''
@@ -115,7 +116,7 @@ di1a[S, H, D] = m11[S, H, D] * m1[S, D];
 dm5[S, H, D] = m11[S, H, D] * m3[S, D];
 di1b[S, H, D] = dm5[S, H, D + {head_dim // 2}].when([D < {head_dim // 2}], (-dm5[S, H, D - {head_dim // 2}])) where D in {head_dim};
 output0[S, H, D] = di1a[S, H, D] + di1b[S, H, D];
-''', input_orders={'input0': dk_embed, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, device=device, arch=welder_arch)
+''', input_orders={'input0': dk_embed, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, op_name=op_name, device=device, arch=welder_arch)
         dk = dk_op([dk_embed, position_ids, cos_cached, sin_cached])
 
         return dq, dk, None, None, None, None, None, None
