@@ -112,14 +112,14 @@ if __name__ == '__main__':
         for (q_hidden_size, kv_hidden_size) in q_kv_hidden_sizes:
             q_num_head = q_hidden_size // head_dim
             kv_num_head = kv_hidden_size // head_dim
-            unsqueeze_dim = 1
+            unsqueeze_dim = 0
 
             ref = LlamaRotaryEmbedding(head_dim, max_position_embeddings=max_seq_lens).to(device)
             fused = FusedLlamaRotaryEmbedding(head_dim, max_position_embeddings=max_seq_lens).to(device)
             q = torch.randn(batch_size, q_num_head, seq_len, head_dim, requires_grad=True, device=device)
             k = torch.randn(batch_size, kv_num_head, seq_len, head_dim, requires_grad=True, device=device)
             v = torch.randn(batch_size, kv_num_head, seq_len, head_dim, requires_grad=True, device=device)
-            position_ids = torch.arange(seq_len, dtype=torch.long, device=device)
+            position_ids = torch.arange(seq_len, dtype=torch.long, device=device).view(1, seq_len)
 
             # print ("WARNING!!! only support unsqueeze_dim = 1 !!!")
             # print ("WARNING!!! only support head_dim % 2 == 0 !!!")

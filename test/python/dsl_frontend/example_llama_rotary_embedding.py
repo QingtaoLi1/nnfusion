@@ -29,11 +29,11 @@ class LlamaRotaryEmbedding(nn.Module):
         emb = torch.cat((freqs, freqs), dim=-1)
         self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)   # [1, MaxSeqLen, Dim]
         self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)   # [1, MaxSeqLen, Dim]
-        # print (f"t: {t.shape}")
-        # print (f"freqs: {freqs.shape}")
-        # print (f"emb: {emb.shape}")
-        # print (f"cos_cached: {self.cos_cached.shape}")
-        # print (f"sin_cached: {self.sin_cached.shape}")
+        print (f"t: {t.shape}")
+        print (f"freqs: {freqs.shape}")
+        print (f"emb: {emb.shape}")
+        print (f"cos_cached: {self.cos_cached.shape}")
+        print (f"sin_cached: {self.sin_cached.shape}")
 
     def _rotate_half(self, x):
         """Rotates half the hidden dims of the input."""
@@ -49,10 +49,8 @@ class LlamaRotaryEmbedding(nn.Module):
         cos = self.cos_cached[:kv_seq_len].to(dtype=v.dtype)
         sin = self.sin_cached[:kv_seq_len].to(dtype=v.dtype)
 
-        # cos = cos[position_ids].unsqueeze(unsqueeze_dim)
-        # sin = sin[position_ids].unsqueeze(unsqueeze_dim)
-        cos = cos[position_ids]
-        sin = sin[position_ids]
+        cos = cos[position_ids].unsqueeze(unsqueeze_dim)
+        sin = sin[position_ids].unsqueeze(unsqueeze_dim)
         # print (f"position_ids: {position_ids.shape}")
         # print (q.shape)
         # print (cos.shape)
