@@ -78,12 +78,13 @@ if __name__ == '__main__':
     torch.set_default_dtype(torch.float16)
 
     # Experiment setup
+    batch_size = 1
     seq_lens = [64, 128, 256, 512, 1024]
     hidden_sizes = [4096, 8192]
     intermediate_sizes = [11008, 28672]
     for seq_len in seq_lens:
         for hidden_size, intermediate_size in zip(hidden_sizes, intermediate_sizes):
-            x = torch.randn(seq_len, hidden_size, requires_grad = True, device=device)
+            x = torch.randn(batch_size, seq_len, hidden_size, requires_grad = True, device=device)
             x2 = x.detach().clone().requires_grad_()
             fused = FusedLlamaMLP(hidden_size, intermediate_size).to(device)
             ref = LlamaMLP(hidden_size, intermediate_size, getattr(fused, 'gate_proj'), getattr(fused, 'up_proj'), getattr(fused, 'down_proj'))

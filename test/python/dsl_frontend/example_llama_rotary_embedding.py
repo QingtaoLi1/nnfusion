@@ -27,8 +27,13 @@ class LlamaRotaryEmbedding(nn.Module):
         freqs = torch.outer(t, self.inv_freq)
         # Different from paper, but it uses a different permutation in order to obtain the same calculation
         emb = torch.cat((freqs, freqs), dim=-1)
-        self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)   # [MaxSeqLen, Dim]
-        self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)   # [MaxSeqLen, Dim]
+        self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)   # [1, MaxSeqLen, Dim]
+        self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)   # [1, MaxSeqLen, Dim]
+        # print (f"t: {t.shape}")
+        # print (f"freqs: {freqs.shape}")
+        # print (f"emb: {emb.shape}")
+        # print (f"cos_cached: {self.cos_cached.shape}")
+        # print (f"sin_cached: {self.sin_cached.shape}")
 
     def _rotate_half(self, x):
         """Rotates half the hidden dims of the input."""
@@ -44,8 +49,15 @@ class LlamaRotaryEmbedding(nn.Module):
         cos = self.cos_cached[:kv_seq_len].to(dtype=v.dtype)
         sin = self.sin_cached[:kv_seq_len].to(dtype=v.dtype)
 
-        cos = cos[position_ids].unsqueeze(unsqueeze_dim)
-        sin = sin[position_ids].unsqueeze(unsqueeze_dim)
+        # cos = cos[position_ids].unsqueeze(unsqueeze_dim)
+        # sin = sin[position_ids].unsqueeze(unsqueeze_dim)
+        cos = cos[position_ids]
+        sin = sin[position_ids]
+        # print (f"position_ids: {position_ids.shape}")
+        # print (q.shape)
+        # print (cos.shape)
+        # print (self._rotate_half(q).shape)
+        # print (sin.shape)
         q_embed = (q * cos) + (self._rotate_half(q) * sin)
         k_embed = (k * cos) + (self._rotate_half(k) * sin)
         return q_embed, k_embed
@@ -56,14 +68,16 @@ class FusedLlamaRotaryEmbeddingFunc(torch.autograd.Function):
     def forward(ctx, q, k, v, kv_seq_len, position_ids, unsqueeze_dim, cos_cached, sin_cached):
         welder_arch = os.environ["WELDER_ARCH"] if "WELDER_ARCH" in os.environ else "A100"
         head_dim = q.shape[-1]
+        position_ids = position_ids.squeeze()
+
         fused_q_op = CustomOp(ir=f'''
 m0[S, D] = input2[S, D] where S in {kv_seq_len};
 m1[S, D] = m0[input1[S], D];
 m2[S, D] = input3[S, D] where S in {kv_seq_len};
 m3[S, D] = m2[input1[S], D];
 
-m4[S, H, D] = (-input0[S, H, D + {head_dim // 2}]).when([D < {head_dim // 2}], input0[S, H, D - {head_dim // 2}]) where D in {head_dim};
-output0[S, H, D] = input0[S, H, D] * m1[S, D] + m4[S, H, D] * m3[S, D];
+m4[B, H, S, D] = (-input0[B, H, S, D + {head_dim // 2}]).when([D < {head_dim // 2}], input0[B, H, S, D - {head_dim // 2}]) where D in {head_dim};
+output0[B, H, S, D] = input0[B, H, S, D] * m1[S, D] + m4[B, H, S, D] * m3[S, D];
 ''', input_orders={'input0': q, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, device=device, arch=welder_arch)
         q_embed = fused_q_op([q, position_ids, cos_cached, sin_cached])
 
@@ -73,8 +87,8 @@ m1[S, D] = m0[input1[S], D];
 m2[MaxS, D] = input3[MaxS, D] where MaxS in {kv_seq_len};
 m3[S, D] = m2[input1[S], D];
 
-m5[S, H, D] = (-input0[S, H, D + {head_dim // 2}]).when([D < {head_dim // 2}], input0[S, H, D - {head_dim // 2}]) where D in {head_dim};
-output0[S, H, D] = input0[S, H, D] * m1[S, D] + m5[S, H, D] * m3[S, D];
+m5[B, H, S, D] = (-input0[B, H, S, D + {head_dim // 2}]).when([D < {head_dim // 2}], input0[B, H, S, D - {head_dim // 2}]) where D in {head_dim};
+output0[B, H, S, D] = input0[B, H, S, D] * m1[S, D] + m5[B, H, S, D] * m3[S, D];
 ''', input_orders={'input0': k, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, device=device, arch=welder_arch)
         k_embed = fused_k_op([k, position_ids, cos_cached, sin_cached])
 
@@ -91,29 +105,31 @@ output0[S, H, D] = input0[S, H, D] * m1[S, D] + m5[S, H, D] * m3[S, D];
         head_dim = ctx.head_dim
         dq_op = CustomOp(ir=f'''
 m0[MaxS, D] = input2[MaxS, D] where MaxS in {kv_seq_len};
-m1[S, D] = m0[input1[S], D];
+m1[S, D] = m0[input1[S], D].cast(`float32`);
 m2[MaxS, D] = input3[MaxS, D] where MaxS in {kv_seq_len};
-m3[S, D] = m2[input1[S], D];
+m3[S, D] = m2[input1[S], D].cast(`float32`);
 
-m10[S, H, D] = input0[S, H, D].cast(`float32`);
-di0a[S, H, D] = m10[S, H, D] * m1[S, D];
-dm4[S, H, D] = m10[S, H, D] * m3[S, D];
-di0b[S, H, D] = dm4[S, H, D + {head_dim // 2}].when([D < {head_dim // 2}], (-dm4[S, H, D - {head_dim // 2}])) where D in {head_dim};
-output0[S, H, D] = di0a[S, H, D] + di0b[S, H, D];
+m10[B, H, S, D] = input0[B, H, S, D].cast(`float32`);
+di0a[B, H, S, D] = m10[B, H, S, D] * m1[S, D];
+dm4[B, H, S, D] = m10[B, H, S, D] * m3[S, D];
+di0b[B, H, S, D] = dm4[B, H, S, D + {head_dim // 2}].when([D < {head_dim // 2}], (-dm4[B, H, S, D - {head_dim // 2}])) where D in {head_dim};
+di0[B, H, S, D] = di0a[B, H, S, D] + di0b[B, H, S, D];
+output0[B, H, S, D] = di0[B, H, S, D].cast(`float16`);
 ''', input_orders={'input0': dq_embed, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, device=device, arch=welder_arch)
         dq = dq_op([dq_embed, position_ids, cos_cached, sin_cached])
 
         dk_op = CustomOp(ir=f'''
 m0[MaxS, D] = input2[MaxS, D] where MaxS in {kv_seq_len};
-m1[S, D] = m0[input1[S], D];
+m1[S, D] = m0[input1[S], D].cast(`float32`);
 m2[MaxS, D] = input3[MaxS, D] where MaxS in {kv_seq_len};
-m3[S, D] = m2[input1[S], D];
+m3[S, D] = m2[input1[S], D].cast(`float32`);
 
-m11[S, H, D] = input0[S, H, D].cast(`float32`);
-di1a[S, H, D] = m11[S, H, D] * m1[S, D];
-dm5[S, H, D] = m11[S, H, D] * m3[S, D];
-di1b[S, H, D] = dm5[S, H, D + {head_dim // 2}].when([D < {head_dim // 2}], (-dm5[S, H, D - {head_dim // 2}])) where D in {head_dim};
-output0[S, H, D] = di1a[S, H, D] + di1b[S, H, D];
+m11[B, H, S, D] = input0[B, H, S, D].cast(`float32`);
+di1a[B, H, S, D] = m11[B, H, S, D] * m1[S, D];
+dm5[B, H, S, D] = m11[B, H, S, D] * m3[S, D];
+di1b[B, H, S, D] = dm5[B, H, S, D + {head_dim // 2}].when([D < {head_dim // 2}], (-dm5[B, H, S, D - {head_dim // 2}])) where D in {head_dim};
+di1[B, H, S, D] = di1a[B, H, S, D] + di1b[B, H, S, D];
+output0[B, H, S, D] = di1[B, H, S, D].cast(`float16`);
 ''', input_orders={'input0': dk_embed, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, device=device, arch=welder_arch)
         dk = dk_op([dk_embed, position_ids, cos_cached, sin_cached])
 
@@ -153,6 +169,7 @@ if __name__ == '__main__':
     torch.set_default_dtype(torch.float16)
 
     arches = ["A100", 'V100', 'A6000']
+    batch_size = 1
     max_seq_lens = 1024
     seq_lens = [64, 128, 256, 512, 1024]
     q_kv_hidden_sizes = [(4096, 4096), (8192, 1024)]
@@ -165,16 +182,15 @@ if __name__ == '__main__':
             for (q_hidden_size, kv_hidden_size) in q_kv_hidden_sizes:
                 q_num_head = q_hidden_size // head_dim
                 kv_num_head = kv_hidden_size // head_dim
-                unsqueeze_dim = 1
+                unsqueeze_dim = 0
 
                 ref = LlamaRotaryEmbedding(head_dim, max_position_embeddings=max_seq_lens).to(device)
                 fused = FusedLlamaRotaryEmbedding(head_dim, max_position_embeddings=max_seq_lens).to(device)
-                q = torch.randn(seq_len, q_num_head, head_dim, requires_grad=True, device=device)
-                k = torch.randn(seq_len, kv_num_head, head_dim, requires_grad=True, device=device)
-                v = torch.randn(seq_len, kv_num_head, head_dim, requires_grad=True, device=device)
-                position_ids = torch.arange(seq_len, dtype=torch.long, device=device)
+                q = torch.randn(batch_size, q_num_head, seq_len, head_dim, requires_grad=True, device=device)
+                k = torch.randn(batch_size, kv_num_head, seq_len, head_dim, requires_grad=True, device=device)
+                v = torch.randn(batch_size, kv_num_head, seq_len, head_dim, requires_grad=True, device=device)
+                position_ids = torch.arange(seq_len, dtype=torch.long, device=device).view(1, seq_len)
 
-                # print ("WARNING!!! only support unsqueeze_dim = 1 !!!")
                 # print ("WARNING!!! only support head_dim % 2 == 0 !!!")
                 # print ("q\t: ", q.shape)                        # [Seq, Head, HeadDim]
                 # print ("k\t: ", k.shape)                        # [Seq, Head, HeadDim]
@@ -260,4 +276,4 @@ if __name__ == '__main__':
         exit_code = os.system(f"mv {home_path}/.kernel/*.json {home_path}/.kernel/{arch}/llama_rope/")
         print (f"(mv JSON) exit_code: {exit_code}")
         KERNEL_CACHE.clear()
-
+        os.system("rm .antares*.out")

@@ -27,21 +27,21 @@ class FusedLlamaRMSNormFunc(torch.autograd.Function):
     @staticmethod
     def forward(ctx, hidden_states, weights, eps):
         welder_arch = os.environ["WELDER_ARCH"] if "WELDER_ARCH" in os.environ else "A100"
-        seq_len, hidden_size = hidden_states.shape
+        hidden_size = hidden_states.shape[-1]
 
         var_op = CustomOp(ir=f'''
-m0[S, H] = input0[S, H].cast(`float32`);
-m1[S, H] = m0[S, H] * m0[S, H];
-m2[S] +=! m1[S, H];
-output0[S] = m2[S] / const({hidden_size}).cast(`float32`) + const({eps}).cast(`float32`);
-''', input_orders={'input0': hidden_states}, op_name=op_name, device=device, arch=welder_arch)
+m0[B, S, H] = input0[B, S, H].cast(`float32`);
+m1[B, S, H] = m0[B, S, H] * m0[B, S, H];
+m2[B, S] +=! m1[B, S, H];
+output0[B, S] = m2[B, S] / const({hidden_size}).cast(`float32`) + const({eps}).cast(`float32`);
+''', input_orders={'input0': hidden_states}, device=device, arch=welder_arch, op_name=op_name)
         var = var_op([hidden_states])
         
         fused_op = CustomOp(ir=f'''
-m0[S, H] = input0[S, H].cast(`float32`);
-m5[S, H] = m0[S, H] / input2[S].call(`sqrt`);
-output0[S, H] = m5[S, H].cast(`float16`) * input1[H];
-''', input_orders={'input0': hidden_states, 'input1': weights, 'input2': var}, op_name=op_name, device=device, arch=welder_arch)
+m0[B, S, H] = input0[B, S, H].cast(`float32`);
+m5[B, S, H] = m0[B, S, H] / input2[B, S].call(`sqrt`);
+output0[B, S, H] = m5[B, S, H].cast(`float16`) * input1[H];
+''', input_orders={'input0': hidden_states, 'input1': weights, 'input2': var}, device=device, arch=welder_arch, op_name=op_name)
         y = fused_op([hidden_states, weights, var])
 
         ctx.save_for_backward(hidden_states, weights, var)
@@ -54,25 +54,25 @@ output0[S, H] = m5[S, H].cast(`float16`) * input1[H];
         hidden_size = hidden_states.shape[-1]
 
         dw_op = CustomOp(ir=f'''
-m6[S, H] = input1[S, H].cast(`float32`) / input2[S].call(`sqrt`);
-dw[H] +=! input0[S, H].cast(`float32`) * m6[S, H].cast(`float16`);
+m6[B, S, H] = input1[B, S, H].cast(`float32`) / input2[B, S].call(`sqrt`);
+dw[H] +=! input0[B, S, H].cast(`float32`) * m6[B, S, H].cast(`float16`);
 output0[H] = dw[H].cast(`float16`);
-''', input_orders={'input0': dy, 'input1': hidden_states, 'input2': var}, op_name=op_name, device=device, arch=welder_arch)
+''', input_orders={'input0': dy, 'input1': hidden_states, 'input2': var}, device=device, arch=welder_arch, op_name=op_name)
         dw = dw_op([dy, hidden_states, var])
 
         dsqrtvar_op = CustomOp(ir=f'''
-m8[S] +=! (input0[S, H] * input2[H]).cast(`float32`) * input1[S, H].cast(`float32`);
-''', input_orders={'input0': dy, 'input1': hidden_states, 'input2': weights}, op_name=op_name, device=device, arch=welder_arch)
+m8[B, S] +=! (input0[B, S, H] * input2[H]).cast(`float32`) * input1[B, S, H].cast(`float32`);
+''', input_orders={'input0': dy, 'input1': hidden_states, 'input2': weights}, device=device, arch=welder_arch, op_name=op_name)
         dsqrtvar = dsqrtvar_op([dy, hidden_states, weights])
 
         dx_op = CustomOp(ir=f'''
-sqrtvar[S] = input3[S].call(`sqrt`);
-dvar[S] = input4[S] * const(-0.5).cast(`float32`) / (sqrtvar[S] * input3[S]);
-dx_1[S, H] = (input0[S, H] * input2[H]).cast(`float32`) / sqrtvar[S];
-dx_2[S, H] = dvar[S] * const(2.0 / {hidden_size}).cast(`float32`) * input1[S, H].cast(`float32`);
-dx[S, H] = dx_1[S, H] + dx_2[S, H];
-output0[S, H] = dx[S, H].cast(`float16`);
-''', input_orders={'input0': dy, 'input1': hidden_states, 'input2': weights, 'input3': var, 'input4': dsqrtvar}, op_name=op_name, device=device, arch=welder_arch)
+sqrtvar[B, S] = input3[B, S].call(`sqrt`);
+dvar[B, S] = input4[B, S] * const(-0.5).cast(`float32`) / (sqrtvar[B, S] * input3[B, S]);
+dx_1[B, S, H] = (input0[B, S, H] * input2[H]).cast(`float32`) / sqrtvar[B, S];
+dx_2[B, S, H] = dvar[B, S] * const(2.0 / {hidden_size}).cast(`float32`) * input1[B, S, H].cast(`float32`);
+dx[B, S, H] = dx_1[B, S, H] + dx_2[B, S, H];
+output0[B, S, H] = dx[B, S, H].cast(`float16`);
+''', input_orders={'input0': dy, 'input1': hidden_states, 'input2': weights, 'input3': var, 'input4': dsqrtvar}, device=device, arch=welder_arch, op_name=op_name)
         dx = dx_op([dy, hidden_states, weights, var, dsqrtvar])
 
         return dx, dw, None

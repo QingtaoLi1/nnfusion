@@ -58,15 +58,17 @@ class FusedLlamaRotaryEmbeddingFunc(torch.autograd.Function):
     def forward(ctx, q, k, v, kv_seq_len, position_ids, unsqueeze_dim, cos_cached, sin_cached):
         welder_arch = os.environ["WELDER_ARCH"] if "WELDER_ARCH" in os.environ else "A100"
         head_dim = q.shape[-1]
+        position_ids = position_ids.squeeze()
+
         fused_q_op = CustomOp(ir=f'''
 m0[S, D] = input2[S, D] where S in {kv_seq_len};
 m1[S, D] = m0[input1[S], D];
 m2[S, D] = input3[S, D] where S in {kv_seq_len};
 m3[S, D] = m2[input1[S], D];
 
-m4[S, H, D] = (-input0[S, H, D + {head_dim // 2}]).when([D < {head_dim // 2}], input0[S, H, D - {head_dim // 2}]) where D in {head_dim};
-output0[S, H, D] = input0[S, H, D] * m1[S, D] + m4[S, H, D] * m3[S, D];
-''', input_orders={'input0': q, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, op_name=op_name, device=device, arch=welder_arch)
+m4[B, H, S, D] = (-input0[B, H, S, D + {head_dim // 2}]).when([D < {head_dim // 2}], input0[B, H, S, D - {head_dim // 2}]) where D in {head_dim};
+output0[B, H, S, D] = input0[B, H, S, D] * m1[S, D] + m4[B, H, S, D] * m3[S, D];
+''', input_orders={'input0': q, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, device=device, arch=welder_arch, op_name=op_name)
         q_embed = fused_q_op([q, position_ids, cos_cached, sin_cached])
 
         fused_k_op = CustomOp(ir=f'''
@@ -75,9 +77,9 @@ m1[S, D] = m0[input1[S], D];
 m2[MaxS, D] = input3[MaxS, D] where MaxS in {kv_seq_len};
 m3[S, D] = m2[input1[S], D];
 
-m5[S, H, D] = (-input0[S, H, D + {head_dim // 2}]).when([D < {head_dim // 2}], input0[S, H, D - {head_dim // 2}]) where D in {head_dim};
-output0[S, H, D] = input0[S, H, D] * m1[S, D] + m5[S, H, D] * m3[S, D];
-''', input_orders={'input0': k, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, op_name=op_name, device=device, arch=welder_arch)
+m5[B, H, S, D] = (-input0[B, H, S, D + {head_dim // 2}]).when([D < {head_dim // 2}], input0[B, H, S, D - {head_dim // 2}]) where D in {head_dim};
+output0[B, H, S, D] = input0[B, H, S, D] * m1[S, D] + m5[B, H, S, D] * m3[S, D];
+''', input_orders={'input0': k, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, device=device, arch=welder_arch, op_name=op_name)
         k_embed = fused_k_op([k, position_ids, cos_cached, sin_cached])
 
         ctx.save_for_backward(position_ids, cos_cached, sin_cached)
@@ -93,30 +95,32 @@ output0[S, H, D] = input0[S, H, D] * m1[S, D] + m5[S, H, D] * m3[S, D];
         head_dim = ctx.head_dim
         dq_op = CustomOp(ir=f'''
 m0[MaxS, D] = input2[MaxS, D] where MaxS in {kv_seq_len};
-m1[S, D] = m0[input1[S], D];
+m1[S, D] = m0[input1[S], D].cast(`float32`);
 m2[MaxS, D] = input3[MaxS, D] where MaxS in {kv_seq_len};
-m3[S, D] = m2[input1[S], D];
+m3[S, D] = m2[input1[S], D].cast(`float32`);
 
-m10[S, H, D] = input0[S, H, D].cast(`float32`);
-di0a[S, H, D] = m10[S, H, D] * m1[S, D];
-dm4[S, H, D] = m10[S, H, D] * m3[S, D];
-di0b[S, H, D] = dm4[S, H, D + {head_dim // 2}].when([D < {head_dim // 2}], (-dm4[S, H, D - {head_dim // 2}])) where D in {head_dim};
-output0[S, H, D] = di0a[S, H, D] + di0b[S, H, D];
-''', input_orders={'input0': dq_embed, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, op_name=op_name, device=device, arch=welder_arch)
+m10[B, H, S, D] = input0[B, H, S, D].cast(`float32`);
+di0a[B, H, S, D] = m10[B, H, S, D] * m1[S, D];
+dm4[B, H, S, D] = m10[B, H, S, D] * m3[S, D];
+di0b[B, H, S, D] = dm4[B, H, S, D + {head_dim // 2}].when([D < {head_dim // 2}], (-dm4[B, H, S, D - {head_dim // 2}])) where D in {head_dim};
+di0[B, H, S, D] = di0a[B, H, S, D] + di0b[B, H, S, D];
+output0[B, H, S, D] = di0[B, H, S, D].cast(`float16`);
+''', input_orders={'input0': dq_embed, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, device=device, arch=welder_arch, op_name=op_name)
         dq = dq_op([dq_embed, position_ids, cos_cached, sin_cached])
 
         dk_op = CustomOp(ir=f'''
 m0[MaxS, D] = input2[MaxS, D] where MaxS in {kv_seq_len};
-m1[S, D] = m0[input1[S], D];
+m1[S, D] = m0[input1[S], D].cast(`float32`);
 m2[MaxS, D] = input3[MaxS, D] where MaxS in {kv_seq_len};
-m3[S, D] = m2[input1[S], D];
+m3[S, D] = m2[input1[S], D].cast(`float32`);
 
-m11[S, H, D] = input0[S, H, D].cast(`float32`);
-di1a[S, H, D] = m11[S, H, D] * m1[S, D];
-dm5[S, H, D] = m11[S, H, D] * m3[S, D];
-di1b[S, H, D] = dm5[S, H, D + {head_dim // 2}].when([D < {head_dim // 2}], (-dm5[S, H, D - {head_dim // 2}])) where D in {head_dim};
-output0[S, H, D] = di1a[S, H, D] + di1b[S, H, D];
-''', input_orders={'input0': dk_embed, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, op_name=op_name, device=device, arch=welder_arch)
+m11[B, H, S, D] = input0[B, H, S, D].cast(`float32`);
+di1a[B, H, S, D] = m11[B, H, S, D] * m1[S, D];
+dm5[B, H, S, D] = m11[B, H, S, D] * m3[S, D];
+di1b[B, H, S, D] = dm5[B, H, S, D + {head_dim // 2}].when([D < {head_dim // 2}], (-dm5[B, H, S, D - {head_dim // 2}])) where D in {head_dim};
+di1[B, H, S, D] = di1a[B, H, S, D] + di1b[B, H, S, D];
+output0[B, H, S, D] = di1[B, H, S, D].cast(`float16`);
+''', input_orders={'input0': dk_embed, 'input1': position_ids, 'input2': cos_cached, 'input3': sin_cached}, device=device, arch=welder_arch, op_name=op_name)
         dk = dk_op([dk_embed, position_ids, cos_cached, sin_cached])
 
         return dq, dk, None, None, None, None, None, None
@@ -148,4 +152,3 @@ class FusedLlamaRotaryEmbedding(nn.Module):
 
     def forward(self, q, k, v, kv_seq_len, position_ids, unsqueeze_dim=1):
         return FusedLlamaRotaryEmbeddingFunc.apply(q, k, v, kv_seq_len, position_ids, unsqueeze_dim, self.cos_cached, self.sin_cached)
-    

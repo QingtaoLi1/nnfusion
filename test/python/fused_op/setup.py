@@ -3,7 +3,7 @@ import setuptools
 
 setuptools.setup(
     name="fused_op",
-    version="0.2.4",
+    version="0.2.5",
     author="Qingtao Li",
     author_email="qingtaoli@microsoft.com",
     description="A test package of fused operations.",
@@ -15,7 +15,7 @@ setuptools.setup(
     classifiers=[
         "Programming Language :: Python :: 3.9",
         "License :: OSI Approved :: MIT License",
-        "Environment :: GPU :: NVIDIA CUDA :: 11.4"
+        "Environment :: GPU :: NVIDIA CUDA :: 11.3"
     ],
     install_requires=[
         "antares==0.3.25.0"

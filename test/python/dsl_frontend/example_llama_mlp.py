@@ -37,20 +37,20 @@ class FusedLlamaMLPFunc(torch.autograd.Function):
         welder_arch = os.environ["WELDER_ARCH"] if "WELDER_ARCH" in os.environ else "A100"
 
         fused_op_0 = CustomOp(ir=f'''
-m0[S, INTER] +=! input0[S, D] * input1[INTER, D];
+m0[B, S, INTER] +=! input0[B, S, D] * input1[INTER, D];
 ''', input_orders={'input0': x, 'input1': gate_weight}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
         y0 = fused_op_0([x, gate_weight])
 
         fused_op_1 = CustomOp(ir=f'''
-m1[S, INTER] +=! input0[S, D] * input1[INTER, D];
+m1[B, S, INTER] +=! input0[B, S, D] * input1[INTER, D];
 ''', input_orders={'input0': x, 'input1': up_weight}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
         y1 = fused_op_1([x, up_weight])
 
         fused_op = CustomOp(ir=f'''
-m11[S, INTER] = input1[S, INTER].cast(`float32`);
-m2[S, INTER] = input1[S, INTER] / (const(1.0).cast(`float16`) + (-m11[S, INTER]).call(`exp`).cast(`float16`));
-m3[S, INTER] = m2[S, INTER] * input2[S, INTER];
-output0[S, D] +=! m3[S, INTER] * input0[D, INTER];
+m1[B, S, INTER] = input1[B, S, INTER].cast(`float32`);
+m2[B, S, INTER] = input1[B, S, INTER] / (const(1.0).cast(`float16`) + (-m1[B, S, INTER]).call(`exp`).cast(`float16`));
+m3[B, S, INTER] = m2[B, S, INTER] * input2[B, S, INTER];
+output0[B, S, D] +=! m3[B, S, INTER] * input0[D, INTER];
 ''', input_orders={'input0': down_weight, 'input1': y0, 'input2': y1}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
         y = fused_op([down_weight, y0, y1])
         ctx.save_for_backward(x, gate_weight, up_weight, down_weight, y0, y1)
@@ -67,50 +67,50 @@ output0[S, D] +=! m3[S, INTER] * input0[D, INTER];
         # print("gate_shape:", gate_weight.shape)     # [INTER, D]
 
         dsilugu_op = CustomOp(ir=f'''
-m1[S, INTER] +=! input0[S, D] * input1[D, INTER];
+m1[B, S, INTER] +=! input0[B, S, D] * input1[D, INTER];
 ''', input_orders={'input0': dy, 'input1': down_weight}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
         dsilugu = dsilugu_op([dy, down_weight])
 
         grad_silu_op =  CustomOp(ir=f'''
-m1[S, INTER] = input0[S, INTER].cast(`float32`);
-m4[S, INTER] = const(1.0).cast(`float16`) / (const(1.0).cast(`float16`) + (-m1[S, INTER]).call(`exp`).cast(`float16`));
-m5[S, INTER] = m4[S, INTER] + input0[S, INTER] * m4[S, INTER] * (const(1.0).cast(`float16`) - m4[S, INTER]);
-m2[S, INTER] = input1[S, INTER] * input2[S, INTER] * m5[S, INTER];
+m1[B, S, INTER] = input0[B, S, INTER].cast(`float32`);
+m4[B, S, INTER] = const(1.0).cast(`float16`) / (const(1.0).cast(`float16`) + (-m1[B, S, INTER]).call(`exp`).cast(`float16`));
+m5[B, S, INTER] = m4[B, S, INTER] + input0[B, S, INTER] * m4[B, S, INTER] * (const(1.0).cast(`float16`) - m4[B, S, INTER]);
+m2[B, S, INTER] = input1[B, S, INTER] * input2[B, S, INTER] * m5[B, S, INTER];
 ''', input_orders={'input0': _gx, 'input1': _ux, 'input2': dsilugu}, device=device, arch=welder_arch)
         grad_silu_gx = grad_silu_op([_gx, _ux, dsilugu])
 
         dx_left_op = CustomOp(ir=f'''
-m7[S, D] +=! input0[S, INTER] * input1[INTER, D];
+m7[B, S, D] +=! input0[B, S, INTER] * input1[INTER, D];
 ''', input_orders={'input0': grad_silu_gx, 'input1': gate_weight}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
         dx_left = dx_left_op([grad_silu_gx, gate_weight])
  
         silu_gate_op = CustomOp(ir=f'''
-m81[S, INTER] = input0[S, INTER].cast(`float32`);
-m9[S, INTER] = input0[S, INTER] / (const(1.0).cast(`float16`) + (-m81[S, INTER]).call(`exp`).cast(`float16`));
+m8[B, S, INTER] = input0[B, S, INTER].cast(`float32`);
+m9[B, S, INTER] = input0[B, S, INTER] / (const(1.0).cast(`float16`) + (-m8[B, S, INTER]).call(`exp`).cast(`float16`));
 ''', input_orders={'input0': _gx}, device=device, arch=welder_arch)
         silu = silu_gate_op([_gx])
  
         dx_op = CustomOp(ir=f'''
-m10[S, INTER] = input0[S, INTER] * input1[S, INTER];
-m11[S, D] +=! m10[S, INTER] * input2[INTER, D];
-output0[S, D] = input3[S, D] + m11[S, D];
+m0[B, S, INTER] = input0[B, S, INTER] * input1[B, S, INTER];
+m1[B, S, D] +=! m0[B, S, INTER] * input2[INTER, D];
+output0[B, S, D] = input3[B, S, D] + m1[B, S, D];
 ''', input_orders={'input0': dsilugu, 'input1': silu, 'input2': up_weight, 'input3': dx_left}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
         dx = dx_op([dsilugu, silu, up_weight, dx_left])
  
         dgw_op = CustomOp(ir=f'''
-m7[INTER, D] +=! input0[S, INTER] * input1[S, D];
+m7[INTER, D] +=! input0[B, S, INTER] * input1[B, S, D];
 ''', input_orders={'input0': grad_silu_gx, 'input1': x}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
         dgw = dgw_op([grad_silu_gx, x])
  
         duw_op = CustomOp(ir=f'''
-m2[S, INTER] = input0[S, INTER] * input1[S, INTER];
-m0[INTER, D] +=! m2[S, INTER] * input2[S, D];
+m2[B, S, INTER] = input0[B, S, INTER] * input1[B, S, INTER];
+m0[INTER, D] +=! m2[B, S, INTER] * input2[B, S, D];
 ''', input_orders={'input0': dsilugu, 'input1': silu, 'input2': x}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
         duw = duw_op([dsilugu, silu, x])
  
         ddw_op_2 = CustomOp(ir=f'''
-m0[S, INTER] = input0[S, INTER] * input1[S, INTER];
-m7[D, INTER] +=! input2[S, D] * m0[S, INTER];
+m0[B, S, INTER] = input0[B, S, INTER] * input1[B, S, INTER];
+m7[D, INTER] +=! input2[B, S, D] * m0[B, S, INTER];
 ''', input_orders={'input0': silu, 'input1': _ux, 'input2': dy}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch)
         ddw = ddw_op_2([silu, _ux, dy])
  
@@ -144,6 +144,7 @@ if __name__ == '__main__':
     torch.set_default_dtype(torch.float16)
 
     arches = ["A100", 'A6000', 'V100']
+    batch_size = 1
     seq_lens = [64, 128, 256, 512, 1024]
     hidden_sizes = [4096, 8192]
     intermediate_sizes = [11008, 28672]
@@ -154,7 +155,7 @@ if __name__ == '__main__':
         
         for seq_len in seq_lens:
             for hidden_size, intermediate_size in zip(hidden_sizes, intermediate_sizes):
-                x = torch.randn(seq_len, hidden_size, requires_grad = True, device=device)
+                x = torch.randn(batch_size, seq_len, hidden_size, requires_grad = True, device=device)
                 x2 = x.detach().clone().requires_grad_()
                 fused = FusedLlamaMLP(hidden_size, intermediate_size).to(device)
                 ref = LlamaMLP(hidden_size, intermediate_size, getattr(fused, 'gate_proj'), getattr(fused, 'up_proj'), getattr(fused, 'down_proj'))
@@ -236,4 +237,5 @@ if __name__ == '__main__':
         exit_code = os.system(f"mv {home_path}/.kernel/*.json {home_path}/.kernel/{arch}/llama_mlp/")
         print (f"(mv JSON) exit_code: {exit_code}")
         KERNEL_CACHE.clear()
+        os.system("rm .antares*.out")
 

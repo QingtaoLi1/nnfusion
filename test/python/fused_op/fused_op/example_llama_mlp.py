@@ -34,21 +34,21 @@ class FusedLlamaMLPFunc(torch.autograd.Function):
         welder_arch = os.environ["WELDER_ARCH"] if "WELDER_ARCH" in os.environ else "A100"
 
         fused_op_0 = CustomOp(ir=f'''
-m0[S, INTER] +=! input0[S, D] * input1[INTER, D];
-''', input_orders={'input0': x, 'input1': gate_weight}, tags="tensorCoreConfig=(0, 1)", op_name=op_name, device=device, arch=welder_arch)
+m0[B, S, INTER] +=! input0[B, S, D] * input1[INTER, D];
+''', input_orders={'input0': x, 'input1': gate_weight}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch, op_name=op_name)
         y0 = fused_op_0([x, gate_weight])
 
         fused_op_1 = CustomOp(ir=f'''
-m1[S, INTER] +=! input0[S, D] * input1[INTER, D];
-''', input_orders={'input0': x, 'input1': up_weight}, tags="tensorCoreConfig=(0, 1)", op_name=op_name, device=device, arch=welder_arch)
+m1[B, S, INTER] +=! input0[B, S, D] * input1[INTER, D];
+''', input_orders={'input0': x, 'input1': up_weight}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch, op_name=op_name)
         y1 = fused_op_1([x, up_weight])
 
         fused_op = CustomOp(ir=f'''
-m11[S, INTER] = input1[S, INTER].cast(`float32`);
-m2[S, INTER] = input1[S, INTER] / (const(1.0).cast(`float16`) + (-m11[S, INTER]).call(`exp`).cast(`float16`));
-m3[S, INTER] = m2[S, INTER] * input2[S, INTER];
-output0[S, D] +=! m3[S, INTER] * input0[D, INTER];
-''', input_orders={'input0': down_weight, 'input1': y0, 'input2': y1}, tags="tensorCoreConfig=(0, 1)", op_name=op_name, device=device, arch=welder_arch)
+m1[B, S, INTER] = input1[B, S, INTER].cast(`float32`);
+m2[B, S, INTER] = input1[B, S, INTER] / (const(1.0).cast(`float16`) + (-m1[B, S, INTER]).call(`exp`).cast(`float16`));
+m3[B, S, INTER] = m2[B, S, INTER] * input2[B, S, INTER];
+output0[B, S, D] +=! m3[B, S, INTER] * input0[D, INTER];
+''', input_orders={'input0': down_weight, 'input1': y0, 'input2': y1}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch, op_name=op_name)
         y = fused_op([down_weight, y0, y1])
         ctx.save_for_backward(x, gate_weight, up_weight, down_weight, y0, y1)
         return y
@@ -57,53 +57,58 @@ output0[S, D] +=! m3[S, INTER] * input0[D, INTER];
     def backward(ctx, dy):
         welder_arch = os.environ["WELDER_ARCH"] if "WELDER_ARCH" in os.environ else "A100"
         x, gate_weight, up_weight, down_weight, _gx, _ux = ctx.saved_tensors
+        # print("dy_shape:", dy.shape)                # [S, D]
+        # print("x_shape:", x.shape)                  # [S, D]
+        # print("down_shape:", down_weight.shape)     # [D, INTER]
+        # print("up_shape:", up_weight.shape)         # [INTER, D]
+        # print("gate_shape:", gate_weight.shape)     # [INTER, D]
 
         dsilugu_op = CustomOp(ir=f'''
-m1[S, INTER] +=! input0[S, D] * input1[D, INTER];
-''', input_orders={'input0': dy, 'input1': down_weight}, tags="tensorCoreConfig=(0, 1)", op_name=op_name, device=device, arch=welder_arch)
+m1[B, S, INTER] +=! input0[B, S, D] * input1[D, INTER];
+''', input_orders={'input0': dy, 'input1': down_weight}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch, op_name=op_name)
         dsilugu = dsilugu_op([dy, down_weight])
 
         grad_silu_op =  CustomOp(ir=f'''
-m1[S, INTER] = input0[S, INTER].cast(`float32`);
-m4[S, INTER] = const(1.0).cast(`float16`) / (const(1.0).cast(`float16`) + (-m1[S, INTER]).call(`exp`).cast(`float16`));
-m5[S, INTER] = m4[S, INTER] + input0[S, INTER] * m4[S, INTER] * (const(1.0).cast(`float16`) - m4[S, INTER]);
-m2[S, INTER] = input1[S, INTER] * input2[S, INTER] * m5[S, INTER];
-''', input_orders={'input0': _gx, 'input1': _ux, 'input2': dsilugu}, op_name=op_name, device=device, arch=welder_arch)
+m1[B, S, INTER] = input0[B, S, INTER].cast(`float32`);
+m4[B, S, INTER] = const(1.0).cast(`float16`) / (const(1.0).cast(`float16`) + (-m1[B, S, INTER]).call(`exp`).cast(`float16`));
+m5[B, S, INTER] = m4[B, S, INTER] + input0[B, S, INTER] * m4[B, S, INTER] * (const(1.0).cast(`float16`) - m4[B, S, INTER]);
+m2[B, S, INTER] = input1[B, S, INTER] * input2[B, S, INTER] * m5[B, S, INTER];
+''', input_orders={'input0': _gx, 'input1': _ux, 'input2': dsilugu}, device=device, arch=welder_arch, op_name=op_name)
         grad_silu_gx = grad_silu_op([_gx, _ux, dsilugu])
 
         dx_left_op = CustomOp(ir=f'''
-m7[S, D] +=! input0[S, INTER] * input1[INTER, D];
-''', input_orders={'input0': grad_silu_gx, 'input1': gate_weight}, tags="tensorCoreConfig=(0, 1)", op_name=op_name, device=device, arch=welder_arch)
+m7[B, S, D] +=! input0[B, S, INTER] * input1[INTER, D];
+''', input_orders={'input0': grad_silu_gx, 'input1': gate_weight}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch, op_name=op_name)
         dx_left = dx_left_op([grad_silu_gx, gate_weight])
  
         silu_gate_op = CustomOp(ir=f'''
-m81[S, INTER] = input0[S, INTER].cast(`float32`);
-m9[S, INTER] = input0[S, INTER] / (const(1.0).cast(`float16`) + (-m81[S, INTER]).call(`exp`).cast(`float16`));
-''', input_orders={'input0': _gx}, op_name=op_name, device=device, arch=welder_arch)
+m8[B, S, INTER] = input0[B, S, INTER].cast(`float32`);
+m9[B, S, INTER] = input0[B, S, INTER] / (const(1.0).cast(`float16`) + (-m8[B, S, INTER]).call(`exp`).cast(`float16`));
+''', input_orders={'input0': _gx}, device=device, arch=welder_arch, op_name=op_name)
         silu = silu_gate_op([_gx])
  
         dx_op = CustomOp(ir=f'''
-m10[S, INTER] = input0[S, INTER] * input1[S, INTER];
-m11[S, D] +=! m10[S, INTER] * input2[INTER, D];
-output0[S, D] = input3[S, D] + m11[S, D];
-''', input_orders={'input0': dsilugu, 'input1': silu, 'input2': up_weight, 'input3': dx_left}, tags="tensorCoreConfig=(0, 1)", op_name=op_name, device=device, arch=welder_arch)
+m0[B, S, INTER] = input0[B, S, INTER] * input1[B, S, INTER];
+m1[B, S, D] +=! m0[B, S, INTER] * input2[INTER, D];
+output0[B, S, D] = input3[B, S, D] + m1[B, S, D];
+''', input_orders={'input0': dsilugu, 'input1': silu, 'input2': up_weight, 'input3': dx_left}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch, op_name=op_name)
         dx = dx_op([dsilugu, silu, up_weight, dx_left])
  
         dgw_op = CustomOp(ir=f'''
-m7[INTER, D] +=! input0[S, INTER] * input1[S, D];
-''', input_orders={'input0': grad_silu_gx, 'input1': x}, tags="tensorCoreConfig=(0, 1)", op_name=op_name, device=device, arch=welder_arch)
+m7[INTER, D] +=! input0[B, S, INTER] * input1[B, S, D];
+''', input_orders={'input0': grad_silu_gx, 'input1': x}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch, op_name=op_name)
         dgw = dgw_op([grad_silu_gx, x])
  
         duw_op = CustomOp(ir=f'''
-m2[S, INTER] = input0[S, INTER] * input1[S, INTER];
-m0[INTER, D] +=! m2[S, INTER] * input2[S, D];
-''', input_orders={'input0': dsilugu, 'input1': silu, 'input2': x}, tags="tensorCoreConfig=(0, 1)", op_name=op_name, device=device, arch=welder_arch)
+m2[B, S, INTER] = input0[B, S, INTER] * input1[B, S, INTER];
+m0[INTER, D] +=! m2[B, S, INTER] * input2[B, S, D];
+''', input_orders={'input0': dsilugu, 'input1': silu, 'input2': x}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch, op_name=op_name)
         duw = duw_op([dsilugu, silu, x])
  
         ddw_op_2 = CustomOp(ir=f'''
-m0[S, INTER] = input0[S, INTER] * input1[S, INTER];
-m7[D, INTER] +=! input2[S, D] * m0[S, INTER];
-''', input_orders={'input0': silu, 'input1': _ux, 'input2': dy}, tags="tensorCoreConfig=(0, 1)", op_name=op_name, device=device, arch=welder_arch)
+m0[B, S, INTER] = input0[B, S, INTER] * input1[B, S, INTER];
+m7[D, INTER] +=! input2[B, S, D] * m0[B, S, INTER];
+''', input_orders={'input0': silu, 'input1': _ux, 'input2': dy}, tags="tensorCoreConfig=(0, 1)", device=device, arch=welder_arch, op_name=op_name)
         ddw = ddw_op_2([silu, _ux, dy])
  
         return dx, dgw, duw, ddw
@@ -130,4 +135,3 @@ class FusedLlamaMLP(nn.Module):
    
     def get_fc2(self):
         return self.fc2
-
