@@ -107,9 +107,6 @@ def pack_kernel_slices(kernel_slices):
   for slice, name, in_args, out_args, thread_extent in kernel_slices:
     code.append(kernel_slice_to_code(slice, name, in_args, out_args, thread_extent))
   code = '\n// ---------------------------------------------------------------------------\n'.join(code)
-
-  with open("temp.cu", "w") as f:
-    f.write(code)
   return code
 
 
