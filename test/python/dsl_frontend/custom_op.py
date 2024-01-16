@@ -3,6 +3,7 @@ import hashlib
 import importlib
 import torch
 import os
+import numpy as np
 from run_tuned_json_graph import get_device_source
 from export_json_graph  import get_input_dict, construct_json_graph
 
@@ -16,6 +17,26 @@ dtype_mapping = {
       'int16': torch.int16,
       'int8': torch.int8,
     }
+
+def torch2onnx(prefix, model, inputs):
+    os.makedirs(args.prefix, exist_ok=True)
+    outputs = model(*inputs)
+    if not isinstance(outputs, (tuple, list)):
+        outputs = (outputs, )
+    input_names = ["input"+str(i) for i in range(len(inputs))]
+    output_names = ["output"+str(i) for i in range(len(outputs))]
+    torch.onnx.export(
+        model, inputs,
+        os.path.join(prefix, "model.onnx"),
+        input_names=input_names,
+        output_names=output_names,
+        export_params=True,
+        training=torch.onnx.TrainingMode.EVAL,
+        do_constant_folding=False,
+        opset_version=11)
+    feed_dict = dict(zip(input_names, [tensor.cpu() for tensor in inputs]))
+    np.savez(os.path.join(prefix, "inputs.npz"), **feed_dict)
+
 def generate_welder_graph(ir, feed_list, extra_outputs, tags=""):
   input_dict, kwargs = {}, {}
   for k, i, shape, dtype in feed_list:
