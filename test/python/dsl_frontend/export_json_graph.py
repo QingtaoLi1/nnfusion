@@ -24,9 +24,9 @@ def get_input_dict(input_orders):
       input_dict[k]['shape'] = [1] 
   return input_dict
 
-def construct_json_graph(ir, input_dict):
+def construct_json_graph(ir, input_dict, extra_outputs=[], tags=""):
   exprss = ir.replace('\n', ' ').strip()
-  ast_seq, input_dict, output_dict, _ = ir_graph_parser(exprss, input_dict)
+  ast_seq, input_dict, output_dict, _ = ir_graph_parser(exprss, input_dict, extra_outputs)
   # print('input_dict:', input_dict)
   # print('output_dict:', output_dict)
   # topological sort and construct graph

@@ -1,7 +1,5 @@
-import os
 import re
-import json
-from common_header import *
+from .common_header import *
 
 code_header = '''
 #include <cuda_runtime.h>
@@ -84,7 +82,13 @@ def kernel_slice_to_code(kernel_slice, kernel_name, in_args, out_args, thread_ex
   idx1 = kernel_slice.find('__global__')
   idx2 = kernel_slice.find(') {\n', idx1) + 4
   kernel_slice = kernel_slice[:idx1] + 'extern "C" ' + kernel_slice[idx1 : idx2] + '\n'.join(grid_size + block_size) +'\n' + kernel_slice[idx2:]
-  kernel = '\n' + kernel_slice
+  # add code header
+  header = cuda_default_header
+  if re.search('cutlass', kernel_slice):
+     header += cutlass_header
+  if re.search('half', kernel_slice):
+    header += cuda_fp16_header
+  kernel = header + '\n' + kernel_slice
   display_inputs = ', '.join([tensor_display(name, prop) for (name, prop) in in_args])
   display_outputs = ', '.join([tensor_display(name, prop) for (name, prop) in out_args])
   code = f'// LOCAL: {kernel_name} -- {display_inputs} -> {display_outputs}\n\n{kernel}\n'
@@ -92,24 +96,10 @@ def kernel_slice_to_code(kernel_slice, kernel_name, in_args, out_args, thread_ex
 
 
 def pack_kernel_slices(kernel_slices):
-  # add code header
-  header = cuda_default_header
-  for slice, name, in_args, out_args, thread_extent in kernel_slices:
-    if re.search('cutlass', slice):
-      header += cutlass_header
-      break
-  for slice, name, in_args, out_args, thread_extent in kernel_slices:
-    if re.search('half', slice):
-      header += cuda_fp16_header
-      break
-
-  code = [header]
+  code = ['']
   for slice, name, in_args, out_args, thread_extent in kernel_slices:
     code.append(kernel_slice_to_code(slice, name, in_args, out_args, thread_extent))
   code = '\n// ---------------------------------------------------------------------------\n'.join(code)
-
-  with open("temp.cu", "w") as f:
-    f.write(code)
   return code
 
 

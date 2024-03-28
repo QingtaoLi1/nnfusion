@@ -10,14 +10,18 @@ class CustomLinear(nn.Module):
         embed_dim,
         ffn_dim,
         activation_dropout,
+        fc2,
     ):
         super().__init__()
         self.embed_dim = embed_dim
         self.activation_dropout_module = torch.nn.Dropout(activation_dropout)
         self.fc2 = nn.Linear(ffn_dim, self.embed_dim)
+        self.fc2.weight = nn.Parameter(fc2.weight.clone())
+        self.fc2.bias = nn.Parameter(fc2.bias.clone())
 
     def reset_parameters(self):
-        self.fc2.reset_parameters()
+        # self.fc2.reset_parameters()
+        pass
 
     def forward(self, x):
         x = F.gelu(x.float()).type_as(x)
@@ -31,6 +35,9 @@ M_2_SQRTPI = 1.12837916709551257390
 class FusedLinearFunc(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, weight, bias, p):
+        print ("x\t: ", x.shape)
+        print ("weight\t: ", weight.shape)
+        print ("bias\t: ", bias.shape)
         mask = (torch.rand_like(x) >= p)
 #         fused_op = CustomOp(ir=f'''
 # output0[N0, N2] +=! input0[N0, N1] * input1[N2, N1];
@@ -42,9 +49,10 @@ m1[N0, N1] = m0[N0, N1] * const(0.5).cast(`float32`) * (const(1.0).cast(`float32
 m2[N0, N1] = m1[N0, N1].cast(`float16`); 
 m3[N0, N1] = m2[N0, N1] * input3[N0, N1] / const({1-p}).cast(`float16`); 
 m4[N0, N2] +=! m3[N0, N1] * input1[N2, N1];
-output0[N0, N2] = m4[N0, N2] + input2[N0];
-''', input_orders={'input0': x, 'input1': weight, 'input2': bias, 'input3': mask}, tags="tensorCoreConfig=(0, 1)", device=device)
+output0[N0, N2] = m4[N0, N2] + input2[N2];
+''', input_orders={'input0': x, 'input1': weight, 'input2': bias, 'input3': mask}, tags="tensorCoreConfig=(0, 1)", device=device, arch="A100")
         y = fused_op([x, weight, bias, mask])
+        print ("y\t: ", y.shape)
         ctx.save_for_backward(x, weight, mask)
         ctx.p = p
         return y
@@ -60,7 +68,7 @@ m1[N0, N1] = m0[N0, N1] * const(0.5).cast(`float32`) * (const(1.0).cast(`float32
 m2[N0, N1] = m1[N0, N1].cast(`float16`); 
 m3[N0, N1] = m2[N0, N1] * input2[N0, N1] / const({1-p}).cast(`float16`); 
 output0[N2, N1] +=! input1[N0, N2] * m3[N0, N1];
-''', input_orders={'input0': x, 'input1': dy, 'input2': mask}, tags="tensorCoreConfig=(0, 1)", device=device)
+''', input_orders={'input0': x, 'input1': dy, 'input2': mask}, tags="tensorCoreConfig=(0, 1)", device=device, arch="A100")
         dw = dw_op([x, dy, mask])
 
         dx_op = CustomOp(ir=f'''
@@ -70,7 +78,7 @@ m2[N0, N1] = m1[N0, N1].cast(`float32`);
 m3[N0, N1] = const(0.5).cast(`float32`) * (const(1.0).cast(`float32`) + (input0[N0, N1] * const({M_SQRT1_2}).cast(`float32`)).call(`erf`));
 m4[N0, N1] = (const(-0.5).cast(`float32`) * input0[N0, N1] * input0[N0, N1]).call(`exp`) * const({M_2_SQRTPI * M_SQRT1_2 * 0.5}).cast(`float32`);
 output0[N0, N1] = m2[N0, N1] * (m3[N0, N1] + input0[N0, N1] * m4[N0, N1]);
-''', input_orders={'input0': x, 'input1': weight, 'input2': mask, 'input3': dy}, tags="tensorCoreConfig=(0, 1)", device=device)
+''', input_orders={'input0': x, 'input1': weight, 'input2': mask, 'input3': dy}, tags="tensorCoreConfig=(0, 1)", device=device, arch="A100")
         dx = dx_op([x, weight, mask, dy])
         return dx, dw, dbias, None
 
@@ -80,14 +88,18 @@ class FusedCustomLinear(nn.Module):
         embed_dim,
         ffn_dim,
         activation_dropout,
+        fc2,
     ):
         super().__init__()
         self.embed_dim = embed_dim
         self.activation_dropout = activation_dropout
         self.fc2 = nn.Linear(ffn_dim, self.embed_dim, dtype=torch.float16)
+        self.fc2.weight = nn.Parameter(fc2.weight.clone().half())
+        self.fc2.bias = nn.Parameter(fc2.bias.clone().half())
 
     def reset_parameters(self):
-        self.fc2.reset_parameters()
+        # self.fc2.reset_parameters()
+        pass
 
     def forward(self, x):
         return FusedLinearFunc.apply(x, self.fc2.weight, self.fc2.bias, self.activation_dropout)
@@ -97,14 +109,18 @@ if __name__ == '__main__':
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     torch.set_default_dtype(torch.float16)
     x = torch.randn(2048, 16384, requires_grad = True, device=device)
-    ref = CustomLinear(4096, 16384, 0).to(device)
-    fused = FusedCustomLinear(4096, 16384, 0).to(device)
+    fc2 = nn.Linear(16384, 4096)
+    ref = CustomLinear(4096, 16384, 0, fc2).to(device)
+    fused = FusedCustomLinear(4096, 16384, 0, fc2).to(device)
     
     y_ref = ref(x)
     y_fused = fused(x)
 
-    y_grad = torch.ones_like(y, device=device)
-    y.backward(y_grad)
+    y_grad = torch.ones_like(y_fused, device=device)
+    y_fused.backward(y_grad)
+
+    print (y_ref[0][:10])
+    print (y_fused[0][:10])
 
     # start = time.time()
     # for i in range(100):
